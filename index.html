@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="ml">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Malayalam Handwriting</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="എഴുത്ത്">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#f6f4ef" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#16181d" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+  :root {
+    --bg: #f6f4ef;
+    --panel: #ffffff;
+    --ink: #1b1d22;
+    --muted: #6b6f78;
+    --line: #d9d5cb;
+    --accent: #1f5f8b;
+    --accent-ink: #ffffff;
+    --chip: #ece8de;
+    --stroke: #14161a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181d;
+      --panel: #1f2229;
+      --ink: #eceae4;
+      --muted: #9a9ea8;
+      --line: #343944;
+      --accent: #6fb0dc;
+      --accent-ink: #0d1116;
+      --chip: #2a2e37;
+      --stroke: #f1efe9;
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, "Noto Sans Malayalam", "Malayalam Sangam MN", system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    padding: max(12px, env(safe-area-inset-top)) 16px max(12px, env(safe-area-inset-bottom));
+    gap: 10px;
+    overscroll-behavior: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  #text {
+    width: 100%;
+    min-height: 92px;
+    max-height: 30vh;
+    resize: none;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel);
+    color: var(--ink);
+    font: inherit;
+    font-size: 22px;
+    line-height: 1.5;
+    padding: 10px 12px;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  #text:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+  #cands {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    min-height: 48px;
+    align-items: center;
+    scrollbar-width: none;
+  }
+  #cands::-webkit-scrollbar { display: none; }
+  .chip {
+    flex: none;
+    border: 0;
+    border-radius: 999px;
+    background: var(--chip);
+    color: var(--ink);
+    font: inherit;
+    font-size: 22px;
+    padding: 8px 18px;
+    min-height: 44px;
+  }
+  .chip:first-child { background: var(--accent); color: var(--accent-ink); }
+  .hint { color: var(--muted); font-size: 14px; padding: 0 4px; }
+  #padwrap {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 200px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--panel);
+    overflow: hidden;
+  }
+  #pad {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+  }
+  #baseline {
+    position: absolute;
+    left: 14px; right: 14px;
+    top: 66%;
+    border-top: 1px dashed var(--line);
+    pointer-events: none;
+  }
+  #placeholder {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: var(--muted);
+    font-size: 18px;
+    pointer-events: none;
+  }
+  #bar { display: flex; gap: 8px; }
+  #bar button {
+    flex: 1;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel);
+    color: var(--ink);
+    font: inherit;
+    font-size: 16px;
+    min-height: 48px;
+    padding: 0 6px;
+  }
+  #bar button:active { background: var(--chip); }
+  #bar #mic.on { background: #c0392b; border-color: #c0392b; color: #fff; }
+  #bar #copy { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); flex: 1.4; font-weight: 600; }
+  #settings { border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; text-decoration: underline; padding: 2px; align-self: center; }
+  dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); width: min(92vw, 420px); padding: 16px; }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  dialog h2 { margin: 0 0 6px; font-size: 18px; }
+  dialog p { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+  dialog label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+  dialog input { display: block; width: 100%; margin-top: 4px; padding: 10px; font-size: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); -webkit-user-select: text; user-select: text; }
+  dialog .row { display: flex; gap: 8px; justify-content: flex-end; }
+  dialog .row button { border: 1px solid var(--line); border-radius: 10px; background: var(--chip); color: var(--ink); font: inherit; padding: 10px 18px; }
+  dialog .row #dlg-save { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  #status { color: var(--muted); font-size: 13px; min-height: 16px; text-align: center; }
+</style>
+</head>
+<body>
+  <textarea id="text" rows="3" placeholder="എഴുതിയ വാക്കുകൾ ഇവിടെ വരും" spellcheck="false" autocomplete="off" autocorrect="off"></textarea>
+  <div id="cands" aria-live="polite"><span class="hint">Write a word below</span></div>
+  <div id="padwrap">
+    <canvas id="pad"></canvas>
+    <div id="baseline"></div>
+    <div id="placeholder">Write here</div>
+  </div>
+  <div id="bar">
+    <button id="undo" type="button">Undo</button>
+    <button id="clear" type="button">Clear</button>
+    <button id="space" type="button">Space</button>
+    <button id="back" type="button">⌫</button>
+    <button id="mic" type="button" aria-label="Voice input">🎤</button>
+    <button id="copy" type="button">Copy</button>
+  </div>
+  <div id="status"></div>
+  <button id="settings" type="button">Voice settings</button>
+  <dialog id="dlg">
+    <form method="dialog">
+      <h2>Voice input (Google Gemini)</h2>
+      <p>Paste a free API key from <b>aistudio.google.com/apikey</b>. It is stored only on this device.</p>
+      <label>API key<input id="key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+      <label>Model<input id="model" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+      <div class="row"><button value="cancel">Cancel</button><button id="dlg-save" value="save">Save</button></div>
+    </form>
+  </dialog>
+
+<script>
+(() => {
+  const ENDPOINT = "https://inputtools.google.com/request?itc=ml-t-i0-handwrit&app=mobilesearch";
+  const IDLE_MS = 700;
+
+  const $ = (id) => document.getElementById(id);
+  const pad = $("pad"), ctx = pad.getContext("2d");
+  const text = $("text"), cands = $("cands"), statusEl = $("status");
+  const placeholder = $("placeholder");
+
+  let strokes = [];          // each stroke: {x:[], y:[], t:[]}
+  let current = null;
+  let t0 = 0;
+  let timer = null;
+  let reqId = 0;
+  let cssW = 0, cssH = 0;
+
+  function resize() {
+    const r = pad.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    cssW = r.width; cssH = r.height;
+    pad.width = Math.round(cssW * dpr);
+    pad.height = Math.round(cssH * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    redraw();
+  }
+
+  function strokeColor() {
+    return getComputedStyle(document.documentElement).getPropertyValue("--stroke").trim() || "#000";
+  }
+
+  function redraw() {
+    ctx.clearRect(0, 0, cssW, cssH);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = strokeColor();
+    for (const s of strokes) {
+      ctx.beginPath();
+      s.x.forEach((x, i) => (i ? ctx.lineTo(x, s.y[i]) : ctx.moveTo(x, s.y[i])));
+      if (s.x.length === 1) ctx.lineTo(s.x[0] + 0.01, s.y[0]);
+      ctx.stroke();
+    }
+    placeholder.style.display = strokes.length ? "none" : "grid";
+  }
+
+  function pt(e) {
+    const r = pad.getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top];
+  }
+
+  pad.addEventListener("pointerdown", (e) => {
+    pad.setPointerCapture(e.pointerId);
+    clearTimeout(timer);
+    if (!strokes.length) t0 = performance.now();
+    const [x, y] = pt(e);
+    current = { x: [x], y: [y], t: [Math.round(performance.now() - t0)] };
+    strokes.push(current);
+    redraw();
+    e.preventDefault();
+  });
+
+  pad.addEventListener("pointermove", (e) => {
+    if (!current) return;
+    const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    for (const ev of (events.length ? events : [e])) {
+      const [x, y] = pt(ev);
+      current.x.push(x); current.y.push(y);
+      current.t.push(Math.round(performance.now() - t0));
+    }
+    redraw();
+    e.preventDefault();
+  });
+
+  function end() {
+    if (!current) return;
+    current = null;
+    timer = setTimeout(recognise, IDLE_MS);
+  }
+  pad.addEventListener("pointerup", end);
+  pad.addEventListener("pointercancel", end);
+
+  async function recognise() {
+    if (!strokes.length) return;
+    const id = ++reqId;
+    const ink = strokes.map((s) => [s.x.map(Math.round), s.y.map(Math.round), s.t]);
+    const body = {
+      app_version: 0.4,
+      api_level: "537.36",
+      device: window.navigator.userAgent,
+      input_type: 0,
+      options: "enable_pre_space",
+      requests: [{
+        writing_guide: { writing_area_width: Math.round(cssW), writing_area_height: Math.round(cssH) },
+        pre_context: text.value.slice(-20),
+        max_num_results: 8,
+        max_completions: 0,
+        language: "ml",
+        ink,
+      }],
+    };
+    setStatus("Recognising…");
+    try {
+      const res = await fetch(ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (id !== reqId) return;
+      if (data[0] !== "SUCCESS") throw new Error(data[0]);
+      showCandidates(data[1][0][1]);
+      setStatus("");
+    } catch (err) {
+      if (id !== reqId) return;
+      cands.innerHTML = "";
+      cands.append(hint("Recognition failed. Check your connection."));
+      setStatus(String(err.message || err));
+    }
+  }
+
+  function hint(s) {
+    const el = document.createElement("span");
+    el.className = "hint";
+    el.textContent = s;
+    return el;
+  }
+
+  function showCandidates(list) {
+    cands.innerHTML = "";
+    if (!list || !list.length) { cands.append(hint("No match. Try again.")); return; }
+    for (const c of list) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "chip";
+      b.textContent = c;
+      b.addEventListener("click", () => commit(c));
+      cands.append(b);
+    }
+    cands.scrollLeft = 0;
+  }
+
+  function commit(word) {
+    insert(word);
+    resetPad();
+    cands.innerHTML = "";
+    cands.append(hint("Write the next word"));
+  }
+
+  function insert(s) {
+    const a = text.selectionStart ?? text.value.length;
+    const b = text.selectionEnd ?? a;
+    text.setRangeText(s, a, b, "end");
+    text.scrollTop = text.scrollHeight;
+    save();
+  }
+
+  function resetPad() {
+    clearTimeout(timer);
+    reqId++;
+    strokes = []; current = null;
+    redraw();
+  }
+
+  function setStatus(s) { statusEl.textContent = s; }
+
+  $("undo").addEventListener("click", () => {
+    clearTimeout(timer);
+    strokes.pop();
+    redraw();
+    if (strokes.length) timer = setTimeout(recognise, 150);
+    else { reqId++; cands.innerHTML = ""; cands.append(hint("Write a word below")); }
+  });
+  $("clear").addEventListener("click", () => {
+    resetPad();
+    cands.innerHTML = ""; cands.append(hint("Write a word below"));
+  });
+  $("space").addEventListener("click", () => insert(" "));
+  $("back").addEventListener("click", () => {
+    const a = text.selectionStart, b = text.selectionEnd;
+    if (a !== b) { text.setRangeText("", a, b, "end"); }
+    else if (a > 0) {
+      const chars = Array.from(text.value.slice(0, a));
+      const last = chars.pop();
+      text.setRangeText("", a - last.length, a, "end");
+    }
+    save();
+  });
+  $("copy").addEventListener("click", async () => {
+    const v = text.value;
+    if (!v) return;
+    try {
+      await navigator.clipboard.writeText(v);
+    } catch {
+      text.focus(); text.select(); document.execCommand("copy");
+      text.setSelectionRange(v.length, v.length);
+    }
+    setStatus("Copied");
+    setTimeout(() => setStatus(""), 1500);
+  });
+
+  // Voice: record audio, send to Google's Gemini API for Malayalam transcription.
+  const mic = $("mic");
+  const DEFAULT_MODEL = "gemini-2.5-flash";
+  const MAX_SECONDS = 60;
+  let recorder = null;
+
+  const getKey = () => { try { return localStorage.getItem("ml-hw-key") || ""; } catch { return ""; } };
+  const getModel = () => { try { return localStorage.getItem("ml-hw-model") || DEFAULT_MODEL; } catch { return DEFAULT_MODEL; } };
+
+  function encodeWav(chunks, inRate) {
+    let len = 0;
+    for (const c of chunks) len += c.length;
+    const all = new Float32Array(len);
+    let o = 0;
+    for (const c of chunks) { all.set(c, o); o += c.length; }
+    const outRate = 16000;
+    const ratio = inRate / outRate;
+    const n = Math.floor(all.length / ratio);
+    const buf = new ArrayBuffer(44 + n * 2);
+    const v = new DataView(buf);
+    const w = (off, str) => { for (let i = 0; i < str.length; i++) v.setUint8(off + i, str.charCodeAt(i)); };
+    w(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); w(8, "WAVE"); w(12, "fmt ");
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, outRate, true); v.setUint32(28, outRate * 2, true);
+    v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, "data"); v.setUint32(40, n * 2, true);
+    for (let i = 0; i < n; i++) {
+      // average the source samples that fall into this output sample (simple low-pass)
+      const a = Math.floor(i * ratio), b = Math.max(a + 1, Math.floor((i + 1) * ratio));
+      let sum = 0;
+      for (let j = a; j < b && j < all.length; j++) sum += all[j];
+      const x = Math.max(-1, Math.min(1, sum / (b - a)));
+      v.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true);
+    }
+    return new Uint8Array(buf);
+  }
+
+  function toBase64(bytes) {
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+
+  async function startRecording() {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ac = new AC();
+    await ac.resume();
+    const src = ac.createMediaStreamSource(stream);
+    const proc = ac.createScriptProcessor(4096, 1, 1);
+    const chunks = [];
+    proc.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    src.connect(proc);
+    proc.connect(ac.destination);
+    const limit = setTimeout(stopRecording, MAX_SECONDS * 1000);
+    recorder = {
+      stop() {
+        clearTimeout(limit);
+        proc.disconnect(); src.disconnect();
+        stream.getTracks().forEach((t) => t.stop());
+        const rate = ac.sampleRate;
+        ac.close();
+        return encodeWav(chunks, rate);
+      },
+    };
+  }
+
+  async function stopRecording() {
+    if (!recorder) return;
+    const wav = recorder.stop();
+    recorder = null;
+    mic.classList.remove("on");
+    if (wav.length < 44 + 16000 * 2 * 0.3) { setStatus("Too short. Hold the mic a bit longer."); return; }
+    setStatus("Transcribing…");
+    mic.disabled = true;
+    try {
+      const res = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(getModel()) + ":generateContent",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": getKey() },
+          body: JSON.stringify({
+            contents: [{ parts: [
+              { text: "Transcribe this speech exactly as spoken. It is in Malayalam: write it in Malayalam script. Output only the transcription, with no commentary, quotes or translation." },
+              { inline_data: { mime_type: "audio/wav", data: toBase64(wav) } },
+            ] }],
+            generationConfig: { temperature: 0 },
+          }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error((data.error && data.error.message) || "HTTP " + res.status);
+      const out = ((data.candidates || [])[0]?.content?.parts || []).map((p) => p.text || "").join("").trim();
+      if (!out) { setStatus("Nothing recognised."); return; }
+      const before = text.value.slice(0, text.selectionStart ?? text.value.length);
+      insert((before && !/\s$/.test(before) ? " " : "") + out + " ");
+      setStatus("");
+    } catch (err) {
+      setStatus("Voice error: " + (err.message || err));
+    } finally {
+      mic.disabled = false;
+    }
+  }
+
+  mic.addEventListener("click", async () => {
+    if (recorder) { stopRecording(); return; }
+    if (!getKey()) { openSettings(); return; }
+    try {
+      await startRecording();
+      mic.classList.add("on");
+      setStatus("Listening… tap the mic again to stop");
+    } catch (err) {
+      setStatus(err && err.name === "NotAllowedError" ? "Microphone permission denied." : "Can't use the microphone: " + (err.message || err));
+    }
+  });
+
+  const dlg = $("dlg");
+  function openSettings() {
+    $("key").value = getKey();
+    $("model").value = getModel();
+    dlg.showModal();
+  }
+  $("settings").addEventListener("click", openSettings);
+  $("dlg-save").addEventListener("click", () => {
+    try {
+      localStorage.setItem("ml-hw-key", $("key").value.trim());
+      localStorage.setItem("ml-hw-model", $("model").value.trim() || DEFAULT_MODEL);
+    } catch {}
+  });
+
+  function save() { try { localStorage.setItem("ml-hw-text", text.value); } catch {} }
+  text.addEventListener("input", save);
+  try { text.value = localStorage.getItem("ml-hw-text") || ""; } catch {}
+
+  window.addEventListener("resize", resize);
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redraw);
+  resize();
+
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+})();
+</script>
+</body>
+</html>
