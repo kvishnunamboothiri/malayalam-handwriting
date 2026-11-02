@@ -1,0 +1,105 @@
+MALAYALAM HANDWRITING - Linux app: how to install
+=================================================
+
+What it is
+----------
+A small always-on-top window with a tray icon. You write a word by hand or speak
+(Malayalam or English) and the text is typed into whichever window you were using,
+for example your browser. It never takes keyboard focus when you click it.
+Recognition is done online by Google, so it needs an internet connection.
+
+What you need
+-------------
+* Linux Mint 22.x (Cinnamon) or Ubuntu 24.04, logged in to an X11 session
+  (Cinnamon uses X11 by default; on Wayland the pasting does not work).
+* Internet access, for installing the packages and for recognition.
+* A free Gemini API key for voice input: https://aistudio.google.com/apikey
+  (handwriting needs no key).
+* A microphone, for voice input.
+
+Install
+-------
+1. Extract the archive into your home folder (or any folder you like):
+
+       tar -xzf malayalam-handwriting.tar.gz -C ~
+
+2. Run the installer from the extracted folder:
+
+       ~/malayalam-handwriting/install.sh
+
+   or, to also start the app in the tray at every login:
+
+       ~/malayalam-handwriting/install.sh --autostart
+
+   The installer installs any missing packages from the Linux repositories (it
+   asks for your password only when something is missing), checks that Python can
+   load them, then creates:
+     - an entry in the applications menu ("Malayalam Handwriting")
+     - an icon on your Desktop
+     - with --autostart, a login entry that starts the app hidden in the tray
+
+   The packages it uses are: python3, python3-gi, gir1.2-gtk-3.0,
+   gir1.2-webkit2-4.1, python3-xlib, gstreamer1.0-plugins-good and
+   gstreamer1.0-pipewire (or gstreamer1.0-pulseaudio on a PulseAudio system).
+   Tray icon support (gir1.2-xapp-1.0) comes with Linux Mint.
+
+3. Start it from the menu or the Desktop icon. Do not move the folder afterwards;
+   if you do, run install.sh again from the new place.
+
+First-time setup (once per computer)
+------------------------------------
+1. Click "Voice settings" at the bottom of the window.
+2. Click the "API key" field and paste your Gemini key with Ctrl+V.
+3. Set "Microphone" to the one you actually use (for example your webcam). The
+   "Automatic" choice sometimes picks a silent input.
+4. Click Save. Settings are remembered.
+
+Using it
+--------
+* Tray icon: left-click shows or hides the window; right-click gives Show/hide and
+  Quit. The window's X button only hides it. Starting the app a second time just
+  shows the copy that is already running.
+* Language: the Malayalam / English switch at the bottom decides how handwriting
+  and voice are read. Set it before you write or speak.
+* Voice: tap the microphone button once, speak, and pause for about a second; each
+  phrase is typed into your other window. The tray icon glows red while the
+  microphone is on. Tap the button again to stop (it also stops by itself after
+  15 seconds of silence).
+* Handwriting: write one word on the pad, then tap a suggestion, or tap Space to
+  take the first one. Tapping Space twice gives a full stop.
+* Buttons: the backspace button and the Enter button act on the other window.
+  Cut and Copy work on the text shown in the app's own box.
+* Text goes in with Ctrl+V, so it works in browsers and editors but not in
+  terminals (they use Ctrl+Shift+V).
+
+Update
+------
+Extract a newer archive over the old folder (or replace the folder), then run
+install.sh again and restart the app (right-click the tray icon, Quit, start it).
+
+Uninstall
+---------
+       ~/malayalam-handwriting/install.sh --uninstall
+
+removes the menu entry, the Desktop icon and the login entry. Delete the folder to
+remove the app itself. Saved settings are in ~/.local/share/ml-handwriting.
+
+If something does not work
+--------------------------
+* Voice does nothing: watch the thin bar along the bottom of the writing pad. If it
+  never moves, choose another microphone in Voice settings. A red message under the
+  pad says what Google answered (for example a wrong key).
+* Text does not appear in the other window: you need an X11 session, and the cursor
+  must be in a text field of that window (not a terminal).
+* No tray icon: make sure the "xapp-status" applet is enabled (right-click the
+  panel, Applets).
+* What the app heard is written to ~/.cache/ml-handwriting/debug.log (replaced on
+  every start). It contains no audio, only levels and status lines.
+
+Files
+-----
+  desktop/ml-handwriting.py   the Linux app
+  index.html, manifest.json, sw.js, icon-*.png   the screen the app shows (the same
+                              page also runs on a phone from GitHub Pages)
+  install.sh                  installer / uninstaller
+  INSTALL.txt                 this file
