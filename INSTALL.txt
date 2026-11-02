@@ -13,9 +13,35 @@ What you need
 * Linux Mint 22.x (Cinnamon) or Ubuntu 24.04, logged in to an X11 session
   (Cinnamon uses X11 by default; on Wayland the pasting does not work).
 * Internet access, for installing the packages and for recognition.
-* A free Gemini API key for voice input: https://aistudio.google.com/apikey
-  (handwriting needs no key).
+* A free Gemini API key for voice input (handwriting needs no key). See
+  "How to get a Gemini API key" below.
 * A microphone, for voice input.
+
+How to get a Gemini API key
+---------------------------
+Voice input sends your speech to Google's Gemini service, which writes it out as
+text. Google asks for a key so it knows who is calling. It is free for personal use
+(within daily limits) and no credit card is needed.
+
+1. Open https://aistudio.google.com/apikey in your browser.
+2. Sign in with a Google account.
+3. Click "Create API key". If it asks which project to use, choose "Create API key
+   in new project" (or any existing project).
+4. A long text starting with "AIza" appears. Click the copy button next to it.
+   Keep this page's address handy: the same page lists your keys and lets you
+   delete one if you ever need to.
+5. Paste it into the app's Voice settings (see "First-time setup" below).
+
+Notes
+  - The button names on Google's page may change slightly over time; look for
+    "Get API key" or "Create API key".
+  - Treat the key like a password. Do not share it, post it online or send it in
+    messages. If it leaks, delete it on the same page and create a new one.
+  - The key is stored only on your computer (inside the app's settings folder).
+    Each computer or phone needs the key pasted once.
+  - On the free plan Google may use what you send to improve its products, so
+    avoid dictating anything private. Daily limits apply; if you see "quota" or
+    "high demand" errors, wait a while and try again.
 
 Install
 -------
@@ -49,7 +75,8 @@ Install
 First-time setup (once per computer)
 ------------------------------------
 1. Click "Voice settings" at the bottom of the window.
-2. Click the "API key" field and paste your Gemini key with Ctrl+V.
+2. Click the "API key" field and paste your Gemini key with Ctrl+V (copy it from
+   the Google page first; see "How to get a Gemini API key" above).
 3. Set "Microphone" to the one you actually use (for example your webcam). The
    "Automatic" choice sometimes picks a silent input.
 4. Click Save. Settings are remembered.
