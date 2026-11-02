@@ -12,6 +12,7 @@ import os
 import socketserver
 import sys
 import threading
+import time
 
 import gi
 
@@ -26,6 +27,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PORT = 18765
 SERVED = {"/", "/index.html", "/manifest.json", "/sw.js", "/icon-180.png", "/icon-512.png"}
 DATA_DIR = os.path.expanduser("~/.local/share/ml-handwriting")
+LOG_FILE = os.path.expanduser("~/.cache/ml-handwriting/debug.log")
 CACHE_DIR = os.path.expanduser("~/.cache/ml-handwriting")
 
 
@@ -125,6 +127,7 @@ class App:
         self.typer = Typer()
         os.makedirs(DATA_DIR, exist_ok=True)
         os.makedirs(CACHE_DIR, exist_ok=True)
+        open(LOG_FILE, "w").close()   # the log only covers the current run
         manager = WebKit2.WebsiteDataManager(base_data_directory=DATA_DIR, base_cache_directory=CACHE_DIR)
         ctx = WebKit2.WebContext.new_with_website_data_manager(manager)
         ucm = WebKit2.UserContentManager()
@@ -159,7 +162,10 @@ class App:
             msg = json.loads(value.to_string())
         except (ValueError, TypeError):
             return
-        if "focus" in msg:
+        if "log" in msg:
+            with open(LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(time.strftime("%H:%M:%S ") + str(msg["log"]) + "\n")
+        elif "focus" in msg:
             self.set_focus_mode(bool(msg["focus"]))
         else:
             self.typer.push(msg)

@@ -127,6 +127,10 @@
     border-top: 1px dashed var(--line);
     pointer-events: none;
   }
+  #meter { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; background: var(--chip); display: none; pointer-events: none; }
+  #meter.on { display: block; }
+  #meter i { display: block; height: 100%; width: 0; background: var(--muted); }
+  #meter.hear i { background: #2e9d5b; }
   #placeholder {
     position: absolute;
     inset: 0;
@@ -196,6 +200,7 @@
   <div id="padwrap">
     <canvas id="pad"></canvas>
     <div id="baseline"></div>
+    <div id="meter"><i></i></div>
     <div id="placeholder">Write here</div>
   </div>
   <div id="bar">
@@ -240,6 +245,7 @@
   // Desktop bridge: inside the Linux app, text and keys are also sent to the window you are typing in.
   const host = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.mlbridge;
   const emit = (msg) => { if (host) host.postMessage(JSON.stringify(msg)); };
+  const dbg = (m) => emit({ log: m });
   if (host) document.documentElement.classList.add("desk");
   const pad = $("pad"), ctx = pad.getContext("2d");
   const text = $("text"), cands = $("cands"), statusEl = $("status");
@@ -552,6 +558,9 @@
     await ac.resume();
     const rate = ac.sampleRate;
     const block = 4096 / rate;
+    const meter = $("meter"), bar = meter.firstElementChild;
+    meter.classList.add("on");
+    dbg("recording started, sample rate " + rate + ", track " + stream.getAudioTracks()[0].label);
     const src = ac.createMediaStreamSource(stream);
     const proc = ac.createScriptProcessor(4096, 1, 1);
 
@@ -562,6 +571,7 @@
 
     function flush() {
       const chunks = seg, enough = voiced >= 0.25;
+      if (chunks) dbg("phrase ended: voiced " + voiced.toFixed(2) + "s of " + segSec.toFixed(2) + "s, " + (enough ? "sent" : "too short, dropped"));
       seg = null; voiced = 0; quiet = 0; segSec = 0; idle = 0;
       if (!chunks || !enough) return;
       const wav = encodeWav(chunks, rate);
@@ -574,6 +584,8 @@
       for (let i = 0; i < d.length; i++) sum += d[i] * d[i];
       const rms = Math.sqrt(sum / d.length);
       const loud = rms > Math.max(0.004, noise * 3);
+      bar.style.width = Math.min(100, rms * 1500) + "%";
+      meter.classList.toggle("hear", loud);
       if (!seg) {
         pre.push(d);
         if (pre.length > 3) pre.shift();
@@ -597,6 +609,7 @@
     recorder = {
       stop() {
         proc.onaudioprocess = null;
+        meter.classList.remove("on", "hear");
         proc.disconnect(); src.disconnect();
         stream.getTracks().forEach((t) => t.stop());
         ac.close();
@@ -664,12 +677,18 @@
       }
       if (!res.ok) throw new Error((data.error && data.error.message) || "HTTP " + res.status);
       const out = ((data.candidates || [])[0]?.content?.parts || []).map((p) => p.text || "").join("").trim();
+      const finish = (data.candidates && data.candidates[0] && data.candidates[0].finishReason) || "-";
+      dbg("response " + res.status + ", " + out.length + " characters, finish " + finish);
       if (out) {
         const before = text.value.slice(0, text.selectionStart ?? text.value.length);
         insert((before && !/\s$/.test(before) ? " " : "") + out + " ");
+        setStatus(recorder ? LISTEN_MSG : "");
+      } else {
+        setStatus("Could not make out any speech. Try again, a little louder.");
+        setTimeout(() => { if (recorder && statusEl.textContent.startsWith("Could not make out")) setStatus(LISTEN_MSG); }, 3000);
       }
-      setStatus(recorder ? LISTEN_MSG : "");
     } catch (err) {
+      dbg("error: " + (err.message || err));
       setStatus("Voice error: " + (err.message || err), true);
     }
   }
