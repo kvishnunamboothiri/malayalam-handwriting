@@ -158,7 +158,11 @@
   #bar #cut, #bar #copy { font-weight: 600; }
   .desk #bar #cut, .desk #bar #copy { display: none; }
   #bar #copy { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-  #settings { border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; text-decoration: underline; padding: 2px; align-self: center; }
+  #opts { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  #lang { display: flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--panel); }
+  #lang button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 14px; padding: 6px 14px; min-height: 34px; }
+  #lang button.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  #settings { border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; text-decoration: underline; padding: 2px; }
   dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); width: min(92vw, 420px); padding: 16px; }
   dialog::backdrop { background: rgba(0,0,0,.45); }
   dialog h2 { margin: 0 0 6px; font-size: 18px; }
@@ -178,6 +182,7 @@
   .kb #bar #space { min-height: 48px; }
   .kb #bar #brk { margin-top: -6px; }
   .kb #settings { display: none; }
+  .kb #lang button { min-height: 28px; padding: 3px 12px; }
   #status { color: var(--muted); font-size: 13px; min-height: 16px; text-align: center; -webkit-user-select: text; user-select: text; }
   #status.err { color: #c0392b; font-size: 15px; font-weight: 600; }
 </style>
@@ -205,7 +210,13 @@
     <button id="copy" type="button">Copy</button>
   </div>
   <div id="status"></div>
-  <button id="settings" type="button">Voice settings</button>
+  <div id="opts">
+    <div id="lang" role="group" aria-label="Language">
+      <button type="button" data-lang="ml">മലയാളം</button>
+      <button type="button" data-lang="en">English</button>
+    </div>
+    <button id="settings" type="button">Voice settings</button>
+  </div>
   <dialog id="dlg">
     <form method="dialog">
       <h2>Voice input (Google Gemini)</h2>
@@ -218,7 +229,10 @@
 
 <script>
 (() => {
-  const ENDPOINT = "https://inputtools.google.com/request?itc=ml-t-i0-handwrit&app=mobilesearch";
+  const endpoint = () => "https://inputtools.google.com/request?itc=" + lang + "-t-i0-handwrit&app=mobilesearch";
+  // The language is fixed by the switch, never guessed: it picks the handwriting model and the voice prompt.
+  let lang = "ml";
+  try { if (localStorage.getItem("ml-hw-lang") === "en") lang = "en"; } catch {}
   const IDLE_MS = 700;
 
   const $ = (id) => document.getElementById(id);
@@ -322,13 +336,13 @@
         pre_context: text.value.slice(-20),
         max_num_results: 8,
         max_completions: 0,
-        language: "ml",
+        language: lang,
         ink,
       }],
     };
     setStatus("Recognising…");
     try {
-      const res = await fetch(ENDPOINT, {
+      const res = await fetch(endpoint(), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -606,7 +620,10 @@
           headers: { "Content-Type": "application/json", "x-goog-api-key": getKey() },
           body: JSON.stringify({
             contents: [{ parts: [
-              { text: "Transcribe this speech exactly as spoken. It is in Malayalam: write it in Malayalam script. Output only the transcription, with no commentary, quotes or translation. If there is no clear speech, output nothing." },
+              { text: (lang === "en"
+                ? "Transcribe this speech exactly as spoken. It is in English: write it in English. If a word is not English, still spell it in English letters. "
+                : "Transcribe this speech exactly as spoken. It is in Malayalam: write it in Malayalam script. ")
+                + "Output only the transcription, with no commentary, quotes or translation. If there is no clear speech, output nothing." },
               { inline_data: { mime_type: "audio/wav", data: audio } },
             ] }],
             generationConfig: { temperature: 0 },
@@ -682,6 +699,22 @@
       else { localStorage.removeItem("ml-hw-model"); localStorage.removeItem("ml-hw-model-set"); }
     } catch {}
   });
+
+  function showLang() {
+    document.querySelectorAll("#lang button").forEach((b) => b.classList.toggle("on", b.dataset.lang === lang));
+    document.documentElement.lang = lang;
+    placeholder.textContent = lang === "en" ? "Write here (English)" : "Write here (Malayalam)";
+  }
+  document.querySelectorAll("#lang button").forEach((b) => b.addEventListener("click", () => {
+    if (b.dataset.lang === lang) return;
+    lang = b.dataset.lang;
+    try { localStorage.setItem("ml-hw-lang", lang); } catch {}
+    resetPad();                        // ink written for the other language is thrown away
+    cands.innerHTML = "";
+    cands.append(hint("Write a word below"));
+    showLang();
+  }));
+  showLang();
 
   // Keyboard button: shows or hides the iOS keyboard for typing into the text box.
   const kbd = $("kbd");
