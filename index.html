@@ -147,7 +147,8 @@
   dialog .row { display: flex; gap: 8px; justify-content: flex-end; }
   dialog .row button { border: 1px solid var(--line); border-radius: 10px; background: var(--chip); color: var(--ink); font: inherit; padding: 10px 18px; }
   dialog .row #dlg-save { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-  #status { color: var(--muted); font-size: 13px; min-height: 16px; text-align: center; }
+  #status { color: var(--muted); font-size: 13px; min-height: 16px; text-align: center; -webkit-user-select: text; user-select: text; }
+  #status.err { color: #c0392b; font-size: 15px; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -342,7 +343,10 @@
     redraw();
   }
 
-  function setStatus(s) { statusEl.textContent = s; }
+  function setStatus(s, isError) {
+    statusEl.textContent = s;
+    statusEl.classList.toggle("err", !!isError);
+  }
 
   $("undo").addEventListener("click", () => {
     clearTimeout(timer);
@@ -382,10 +386,10 @@
   // Voice: record audio, send to Google's Gemini API for Malayalam transcription.
   const mic = $("mic");
   const DEFAULT_MODEL = "gemini-2.5-flash";
-  const MAX_SECONDS = 60;
   let recorder = null;
 
   const getKey = () => { try { return localStorage.getItem("ml-hw-key") || ""; } catch { return ""; } };
+  try { if (!localStorage.getItem("ml-hw-model-set")) localStorage.removeItem("ml-hw-model"); } catch {}
   const getModel = () => { try { return localStorage.getItem("ml-hw-model") || DEFAULT_MODEL; } catch { return DEFAULT_MODEL; } };
 
   function encodeWav(chunks, inRate) {
@@ -421,64 +425,148 @@
     return btoa(bin);
   }
 
+  async function findModel() {
+    const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", { headers: { "x-goog-api-key": getKey() } });
+    if (!res.ok) return null;
+    const list = ((await res.json()).models || [])
+      .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
+      .map((m) => m.name.replace(/^models\//, ""))
+      .filter((n) => /^gemini-[\d.]+-flash$/.test(n));
+    const ver = (n) => parseFloat(n.match(/^gemini-([\d.]+)-/)[1]);
+    list.sort((a, b) => ver(b) - ver(a));
+    return list[0] || null;
+  }
+
+  // Hands-free listening: a pause after speech sends that phrase for transcription while listening continues.
+  const LISTEN_MSG = "Listening… speak, then pause. Tap the mic to stop.";
+  const END_SILENCE = 1.2;   // seconds of quiet that end a phrase
+  const IDLE_STOP = 15;      // stop listening after this long with no speech
+  const MAX_PHRASE = 25;     // seconds; longer phrases are cut here
+  let pending = Promise.resolve();   // transcriptions run one after another so the text stays in order
+
   async function startRecording() {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
     const AC = window.AudioContext || window.webkitAudioContext;
     const ac = new AC();
     await ac.resume();
+    const rate = ac.sampleRate;
+    const block = 4096 / rate;
     const src = ac.createMediaStreamSource(stream);
     const proc = ac.createScriptProcessor(4096, 1, 1);
-    const chunks = [];
-    proc.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+
+    let pre = [];          // the last few blocks before speech starts, so the first syllable isn't clipped
+    let seg = null;        // blocks of the phrase being spoken
+    let voiced = 0, quiet = 0, idle = 0, segSec = 0;
+    let noise = 0.005;     // running estimate of background level
+
+    function flush() {
+      const chunks = seg, enough = voiced >= 0.25;
+      seg = null; voiced = 0; quiet = 0; segSec = 0; idle = 0;
+      if (!chunks || !enough) return;
+      const wav = encodeWav(chunks, rate);
+      pending = pending.then(() => transcribe(wav));
+    }
+
+    proc.onaudioprocess = (e) => {
+      const d = new Float32Array(e.inputBuffer.getChannelData(0));
+      let sum = 0;
+      for (let i = 0; i < d.length; i++) sum += d[i] * d[i];
+      const rms = Math.sqrt(sum / d.length);
+      const loud = rms > Math.max(0.012, noise * 3);
+      if (!seg) {
+        pre.push(d);
+        if (pre.length > 3) pre.shift();
+        if (loud) {
+          seg = pre; pre = [];
+          segSec = seg.length * block; voiced = block; quiet = 0;
+        } else {
+          noise = 0.95 * noise + 0.05 * rms;
+          idle += block;
+          if (idle >= IDLE_STOP) stopRecording();
+        }
+      } else {
+        seg.push(d);
+        segSec += block;
+        if (loud) { voiced += block; quiet = 0; } else quiet += block;
+        if (quiet >= END_SILENCE || segSec >= MAX_PHRASE) flush();
+      }
+    };
     src.connect(proc);
     proc.connect(ac.destination);
-    const limit = setTimeout(stopRecording, MAX_SECONDS * 1000);
     recorder = {
       stop() {
-        clearTimeout(limit);
+        proc.onaudioprocess = null;
         proc.disconnect(); src.disconnect();
         stream.getTracks().forEach((t) => t.stop());
-        const rate = ac.sampleRate;
         ac.close();
-        return encodeWav(chunks, rate);
+        flush();
       },
     };
   }
 
-  async function stopRecording() {
+  function stopRecording() {
     if (!recorder) return;
-    const wav = recorder.stop();
+    recorder.stop();
     recorder = null;
     mic.classList.remove("on");
-    if (wav.length < 44 + 16000 * 2 * 0.3) { setStatus("Too short. Hold the mic a bit longer."); return; }
-    setStatus("Transcribing…");
-    mic.disabled = true;
+    pending.then(() => { if (!recorder && !statusEl.classList.contains("err")) setStatus(""); });
+  }
+
+  async function transcribe(wav) {
     try {
-      const res = await fetch(
-        "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(getModel()) + ":generateContent",
+      const audio = toBase64(wav);
+      const call = (model) => fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent",
         {
           method: "POST",
+          signal: AbortSignal.timeout(20000),
           headers: { "Content-Type": "application/json", "x-goog-api-key": getKey() },
           body: JSON.stringify({
             contents: [{ parts: [
-              { text: "Transcribe this speech exactly as spoken. It is in Malayalam: write it in Malayalam script. Output only the transcription, with no commentary, quotes or translation." },
-              { inline_data: { mime_type: "audio/wav", data: toBase64(wav) } },
+              { text: "Transcribe this speech exactly as spoken. It is in Malayalam: write it in Malayalam script. Output only the transcription, with no commentary, quotes or translation. If there is no clear speech, output nothing." },
+              { inline_data: { mime_type: "audio/wav", data: audio } },
             ] }],
             generationConfig: { temperature: 0 },
           }),
         }
       );
-      const data = await res.json();
+      // Try the saved model first, then fall back to others when one is overloaded (503/429) or retired (404).
+      const models = [getModel(), "gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-2.5-flash-lite", "gemini-flash-latest"];
+      const tried = new Set();
+      let res, data, discovered = false;
+      for (let i = 0; i < models.length; i++) {
+        const m = models[i];
+        if (tried.has(m)) continue;
+        tried.add(m);
+        for (let attempt = 0; attempt < 2; attempt++) {
+          if (attempt) await new Promise((r) => setTimeout(r, 1500));
+          setStatus("Transcribing (" + m + ")…");
+          try {
+            res = await call(m);
+            data = await res.json();
+          } catch (e) {
+            res = { ok: false, status: 408 };
+            data = { error: { message: "No reply from " + m + " within 20 seconds" } };
+            break;
+          }
+          if (res.status !== 503) break;
+        }
+        if (res.ok || ![404, 408, 429, 503].includes(res.status)) break;
+        if (i === models.length - 1 && !discovered) {
+          discovered = true;
+          const alt = await findModel();
+          if (alt) models.push(alt);
+        }
+      }
       if (!res.ok) throw new Error((data.error && data.error.message) || "HTTP " + res.status);
       const out = ((data.candidates || [])[0]?.content?.parts || []).map((p) => p.text || "").join("").trim();
-      if (!out) { setStatus("Nothing recognised."); return; }
-      const before = text.value.slice(0, text.selectionStart ?? text.value.length);
-      insert((before && !/\s$/.test(before) ? " " : "") + out + " ");
-      setStatus("");
+      if (out) {
+        const before = text.value.slice(0, text.selectionStart ?? text.value.length);
+        insert((before && !/\s$/.test(before) ? " " : "") + out + " ");
+      }
+      setStatus(recorder ? LISTEN_MSG : "");
     } catch (err) {
-      setStatus("Voice error: " + (err.message || err));
-    } finally {
-      mic.disabled = false;
+      setStatus("Voice error: " + (err.message || err), true);
     }
   }
 
@@ -488,9 +576,9 @@
     try {
       await startRecording();
       mic.classList.add("on");
-      setStatus("Listening… tap the mic again to stop");
+      setStatus(LISTEN_MSG);
     } catch (err) {
-      setStatus(err && err.name === "NotAllowedError" ? "Microphone permission denied." : "Can't use the microphone: " + (err.message || err));
+      setStatus(err && err.name === "NotAllowedError" ? "Microphone permission denied." : "Can't use the microphone: " + (err.message || err), true);
     }
   });
 
@@ -504,7 +592,9 @@
   $("dlg-save").addEventListener("click", () => {
     try {
       localStorage.setItem("ml-hw-key", $("key").value.trim());
-      localStorage.setItem("ml-hw-model", $("model").value.trim() || DEFAULT_MODEL);
+      const m = $("model").value.trim();
+      if (m && m !== DEFAULT_MODEL) { localStorage.setItem("ml-hw-model", m); localStorage.setItem("ml-hw-model-set", "1"); }
+      else { localStorage.removeItem("ml-hw-model"); localStorage.removeItem("ml-hw-model-set"); }
     } catch {}
   });
 
