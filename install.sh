@@ -2,7 +2,8 @@
 # Installs the Malayalam Handwriting Linux app (Linux Mint / Ubuntu, X11 session):
 # needed packages, an entry in the applications menu and a shortcut on the Desktop.
 #   ./install.sh              install
-#   ./install.sh --uninstall  remove the menu entry and the Desktop shortcut
+#   ./install.sh --autostart  install, and also start the app (in the tray) at every login
+#   ./install.sh --uninstall  remove the menu entry, the Desktop shortcut and the login entry
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,10 +11,11 @@ APP="$HERE/desktop/ml-handwriting.py"
 MENU_FILE="$HOME/.local/share/applications/ml-handwriting.desktop"
 DESKTOP_DIR="$(xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME/Desktop")"
 DESKTOP_FILE="$DESKTOP_DIR/ml-handwriting.desktop"
+AUTOSTART_FILE="$HOME/.config/autostart/ml-handwriting.desktop"
 
 if [ "${1:-}" = "--uninstall" ]; then
-    rm -f "$MENU_FILE" "$DESKTOP_FILE"
-    echo "Removed the menu entry and the Desktop shortcut. The app folder was left in place."
+    rm -f "$MENU_FILE" "$DESKTOP_FILE" "$AUTOSTART_FILE"
+    echo "Removed the menu entry, the Desktop shortcut and the login entry. The app folder was left in place."
     exit 0
 fi
 
@@ -68,6 +70,22 @@ if [ -d "$DESKTOP_DIR" ]; then
     echo "Desktop icon: $DESKTOP_FILE"
 else
     echo "No Desktop folder found, so no Desktop shortcut was made."
+fi
+
+if [ "${1:-}" = "--autostart" ]; then
+    mkdir -p "$(dirname "$AUTOSTART_FILE")"
+    cat > "$AUTOSTART_FILE" <<AUTO
+[Desktop Entry]
+Type=Application
+Name=Malayalam Handwriting
+Comment=Handwriting and voice input (starts in the tray)
+Exec=python3 "$APP" --hidden
+Icon=$HERE/icon-512.png
+Terminal=false
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=5
+AUTO
+    echo "Login entry:  $AUTOSTART_FILE (starts hidden in the tray; click its icon to show or hide the window)"
 fi
 
 if [ "${XDG_SESSION_TYPE:-x11}" = "wayland" ]; then

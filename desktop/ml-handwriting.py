@@ -4,6 +4,10 @@
 A small always-on-top window that never takes keyboard focus. Words you write or
 speak are pasted into whichever window you were typing in (for example your browser).
 It runs the same web app as the phone version, served from this folder's parent.
+
+A tray icon toggles the window (left click) or offers Show/Hide and Quit (right click).
+Closing the window only hides it. Start it with --hidden to begin in the tray only,
+which is what the startup entry does. Starting a second copy just shows the first.
 """
 import functools
 import http.server
@@ -13,6 +17,7 @@ import socketserver
 import sys
 import threading
 import time
+import urllib.request
 
 import gi
 
@@ -20,6 +25,12 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 gi.require_version("WebKit2", "4.1")
 from gi.repository import Gdk, GLib, Gtk, WebKit2  # noqa: E402
+
+try:
+    gi.require_version("XApp", "1.0")
+    from gi.repository import XApp  # noqa: E402
+except (ValueError, ImportError):
+    XApp = None
 from Xlib import X, XK, display, protocol  # noqa: E402
 from Xlib.ext import xtest  # noqa: E402
 
@@ -34,7 +45,16 @@ CACHE_DIR = os.path.expanduser("~/.cache/ml-handwriting")
 class Handler(http.server.SimpleHTTPRequestHandler):
     """Serves only the web app's own files, never the rest of the folder (such as .git)."""
 
+    on_show = None   # set by the app: called when a second copy asks the first one to show itself
+
     def do_GET(self):
+        if self.path == "/__show":
+            if Handler.on_show:
+                GLib.idle_add(Handler.on_show)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+            return
         if self.path.split("?")[0] not in SERVED:
             self.send_error(404)
             return
@@ -123,8 +143,9 @@ class Typer:
 
 
 class App:
-    def __init__(self):
+    def __init__(self, hidden=False):
         self.typer = Typer()
+        self.last_real = 0     # the last window you were using (not this app, not the panel)
         os.makedirs(DATA_DIR, exist_ok=True)
         os.makedirs(CACHE_DIR, exist_ok=True)
         open(LOG_FILE, "w").close()   # the log only covers the current run
@@ -151,10 +172,84 @@ class App:
         except GLib.Error:
             pass
         win.connect("destroy", Gtk.main_quit)
+        win.connect("delete-event", self.on_close)
         self.win = win
         self.previous = 0
         win.add(self.view)
         win.show_all()
+        self.tray = self.make_tray()
+        Handler.on_show = self.show
+        GLib.timeout_add(400, self.remember_active)
+        if hidden and self.tray:
+            win.hide()
+
+    # --- tray icon and showing / hiding -------------------------------------------------------
+
+    def make_tray(self):
+        if XApp is None:
+            return None
+        icon = XApp.StatusIcon()
+        icon.set_name("ml-handwriting")
+        icon.set_icon_name(os.path.join(ROOT, "icon-512.png"))
+        icon.set_tooltip_text("Malayalam Handwriting")
+        menu = Gtk.Menu()
+        item_toggle = Gtk.MenuItem(label="Show / hide")
+        item_toggle.connect("activate", lambda _i: self.toggle())
+        item_quit = Gtk.MenuItem(label="Quit")
+        item_quit.connect("activate", lambda _i: Gtk.main_quit())
+        for item in (item_toggle, Gtk.SeparatorMenuItem(), item_quit):
+            menu.append(item)
+        menu.show_all()
+        icon.set_secondary_menu(menu)
+        icon.connect("activate", self.on_tray_activate)
+        icon.set_visible(True)
+        return icon
+
+    def on_tray_activate(self, _icon, button, _time):
+        if button == Gdk.BUTTON_PRIMARY:
+            self.toggle()
+
+    def remember_active(self):
+        """Note which window you are working in, so it gets focus back after the window is shown."""
+        try:
+            wid = self.typer.active_window()
+            if wid and wid != self.own_xid():
+                cls = self.typer.disp.create_resource_object("window", wid).get_wm_class() or ("", "")
+                if cls[1] not in ("Cinnamon", "Muffin", "Nemo-desktop", "Xdg-desktop-portal-gtk"):
+                    self.last_real = wid
+        except Exception:
+            pass
+        return True
+
+    def own_xid(self):
+        gdk_win = self.win.get_window()
+        return gdk_win.get_xid() if gdk_win is not None and hasattr(gdk_win, "get_xid") else 0
+
+    def toggle(self):
+        if self.win.get_visible():
+            self.hide()
+        else:
+            self.show()
+
+    def show(self):
+        if not self.win.get_visible():
+            self.win.show()
+        self.win.set_keep_above(True)
+        GLib.timeout_add(150, lambda: (self.typer.activate(self.last_real), False)[1])   # keep typing where you were
+        return False
+
+    def hide(self):
+        # stop listening first so the microphone is not left on in a hidden window
+        self.view.run_javascript(
+            "(()=>{const m=document.getElementById('mic'); if (m && m.classList.contains('on')) m.click();})()",
+            None, None, None)
+        self.win.hide()
+
+    def on_close(self, _win, _event):
+        if self.tray:
+            self.hide()
+            return True    # keep running in the tray
+        return False
 
     def on_message(self, _manager, result):
         value = result.get_js_value() if hasattr(result, "get_js_value") else result
@@ -196,9 +291,14 @@ class App:
 def main():
     try:
         start_server()
-    except OSError as err:
-        sys.exit(f"Port {PORT} is busy ({err}). Close the other copy of this app.")
-    App()
+    except OSError:
+        # already running: ask that copy to show itself, then leave
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{PORT}/__show", timeout=3).read()
+            sys.exit(0)
+        except OSError as err:
+            sys.exit(f"Port {PORT} is in use by something else ({err}).")
+    App(hidden="--hidden" in sys.argv)
     Gtk.main()
 
 
