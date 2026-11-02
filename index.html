@@ -38,6 +38,9 @@
     }
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  /* Stops iOS zooming the page when a button is tapped twice quickly (the pad itself keeps touch-action: none). */
+  html, body, button, textarea { touch-action: manipulation; }
+  button { -webkit-touch-callout: none; }
   html, body { height: 100%; margin: 0; overflow: hidden; }
   /* Follow the visible area (it shrinks when the keyboard is open) instead of the full page. */
   body { position: fixed; left: 0; right: 0; top: var(--vvtop, 0px); height: var(--vvh, 100%); }
