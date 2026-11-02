@@ -38,7 +38,9 @@
     }
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { height: 100%; margin: 0; }
+  html, body { height: 100%; margin: 0; overflow: hidden; }
+  /* Follow the visible area (it shrinks when the keyboard is open) instead of the full page. */
+  body { position: fixed; left: 0; right: 0; top: var(--vvtop, 0px); height: var(--vvh, 100%); }
   body {
     background: var(--bg);
     color: var(--ink);
@@ -137,9 +139,10 @@
   #bar button:active { background: var(--chip); }
   #bar #mic.on { background: #c0392b; border-color: #c0392b; color: #fff; }
   #bar #brk { flex-basis: 100%; height: 0; margin-top: -8px; }
-  #bar #kbd { flex: 0 0 56px; font-size: 22px; }
+  #bar #kbd { font-size: 22px; }
+  #bar #space { flex: 2.4 1 40%; min-height: 58px; font-size: 18px; font-weight: 600; }
   #bar #kbd.on { background: var(--chip); border-color: var(--accent); }
-  #bar #cut, #bar #copy { flex: 1 1 30%; font-weight: 600; }
+  #bar #cut, #bar #copy { flex: 1 1 20%; font-weight: 600; }
   #bar #copy { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   #settings { border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; text-decoration: underline; padding: 2px; align-self: center; }
   dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); width: min(92vw, 420px); padding: 16px; }
@@ -151,6 +154,15 @@
   dialog .row { display: flex; gap: 8px; justify-content: flex-end; }
   dialog .row button { border: 1px solid var(--line); border-radius: 10px; background: var(--chip); color: var(--ink); font: inherit; padding: 10px 18px; }
   dialog .row #dlg-save { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .kb body { padding-top: 8px; padding-bottom: 8px; gap: 6px; }
+  .kb #text { min-height: 56px; max-height: 56px; font-size: 20px; padding: 6px 10px; }
+  .kb #cands { min-height: 44px; }
+  .kb #padwrap { min-height: 70px; }
+  .kb #bar { gap: 6px; }
+  .kb #bar button { min-height: 40px; }
+  .kb #bar #space { min-height: 48px; }
+  .kb #bar #brk { margin-top: -6px; }
+  .kb #settings { display: none; }
   #status { color: var(--muted); font-size: 13px; min-height: 16px; text-align: center; -webkit-user-select: text; user-select: text; }
   #status.err { color: #c0392b; font-size: 15px; font-weight: 600; }
 </style>
@@ -166,11 +178,11 @@
   <div id="bar">
     <button id="undo" type="button">Undo</button>
     <button id="clear" type="button">Clear</button>
-    <button id="space" type="button">Space</button>
     <button id="back" type="button">⌫</button>
     <button id="mic" type="button" aria-label="Voice input">🎤</button>
-    <span id="brk"></span>
     <button id="kbd" type="button" aria-label="Keyboard">⌨</button>
+    <span id="brk"></span>
+    <button id="space" type="button">Space</button>
     <button id="cut" type="button">Cut</button>
     <button id="copy" type="button">Copy</button>
   </div>
@@ -659,6 +671,21 @@
   text.addEventListener("input", save);
   try { text.value = localStorage.getItem("ml-hw-text") || ""; } catch {}
 
+  // Keep the layout inside the area above the keyboard.
+  function fit() {
+    const vv = window.visualViewport;
+    const root = document.documentElement;
+    if (!vv) return;
+    root.style.setProperty("--vvh", vv.height + "px");
+    root.style.setProperty("--vvtop", vv.offsetTop + "px");
+    root.classList.toggle("kb", window.innerHeight - vv.height > 120);
+  }
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", fit);
+    window.visualViewport.addEventListener("scroll", fit);
+  }
+  fit();
+  new ResizeObserver(resize).observe(pad);   // the pad changes size when the keyboard opens or closes
   window.addEventListener("resize", resize);
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redraw);
   resize();
