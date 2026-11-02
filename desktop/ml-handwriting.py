@@ -19,7 +19,7 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 gi.require_version("WebKit2", "4.1")
 from gi.repository import Gdk, GLib, Gtk, WebKit2  # noqa: E402
-from Xlib import X, XK, display  # noqa: E402
+from Xlib import X, XK, display, protocol  # noqa: E402
 from Xlib.ext import xtest  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -70,6 +70,22 @@ class Typer:
         for m in reversed(mods):
             xtest.fake_input(self.disp, X.KeyRelease, self._code(m))
         self.disp.sync()
+
+    def active_window(self):
+        prop = self.disp.screen().root.get_full_property(self.disp.intern_atom("_NET_ACTIVE_WINDOW"), X.AnyPropertyType)
+        return int(prop.value[0]) if prop and len(prop.value) and prop.value[0] else 0
+
+    def activate(self, wid):
+        """Give keyboard focus back to the window the user was typing in."""
+        if not wid:
+            return
+        ev = protocol.event.ClientMessage(
+            window=self.disp.create_resource_object("window", wid),
+            client_type=self.disp.intern_atom("_NET_ACTIVE_WINDOW"),
+            data=(32, [1, X.CurrentTime, 0, 0, 0]),
+        )
+        self.disp.screen().root.send_event(ev, event_mask=X.SubstructureRedirectMask | X.SubstructureNotifyMask)
+        self.disp.flush()
 
     def push(self, msg):
         self.queue.append(msg)
@@ -132,15 +148,33 @@ class App:
         except GLib.Error:
             pass
         win.connect("destroy", Gtk.main_quit)
+        self.win = win
+        self.previous = 0
         win.add(self.view)
         win.show_all()
 
     def on_message(self, _manager, result):
         value = result.get_js_value() if hasattr(result, "get_js_value") else result
         try:
-            self.typer.push(json.loads(value.to_string()))
+            msg = json.loads(value.to_string())
         except (ValueError, TypeError):
-            pass
+            return
+        if "focus" in msg:
+            self.set_focus_mode(bool(msg["focus"]))
+        else:
+            self.typer.push(msg)
+
+    def set_focus_mode(self, wanted):
+        """Take keyboard focus while a text field here needs it (the settings dialog), then give it back."""
+        if wanted:
+            self.previous = self.typer.active_window()
+            self.win.set_accept_focus(True)
+            self.win.present()
+            self.view.grab_focus()
+        else:
+            self.win.set_accept_focus(False)
+            self.typer.activate(self.previous)
+            self.previous = 0
 
     def on_permission(self, _view, request):
         if isinstance(request, WebKit2.UserMediaPermissionRequest):

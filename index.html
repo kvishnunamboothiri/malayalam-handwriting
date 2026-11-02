@@ -669,8 +669,10 @@
   function openSettings() {
     $("key").value = getKey();
     $("model").value = getModel();
+    emit({ focus: true });      // the Linux app only takes keyboard focus while this dialog is open
     dlg.showModal();
   }
+  dlg.addEventListener("close", () => emit({ focus: false }));
   $("settings").addEventListener("click", openSettings);
   $("dlg-save").addEventListener("click", () => {
     try {
