@@ -113,7 +113,21 @@ class Typer:
         self.disp.flush()
 
     def push(self, msg):
-        self.queue.append(msg)
+        if "text" in msg:
+            # Spaces at the start or end are typed as real Space key presses: many web editors
+            # trim spaces from pasted text, which would glue the next phrase to this one.
+            text = str(msg["text"])
+            core = text.strip(" ")
+            if core:
+                lead, trail = len(text) - len(text.lstrip(" ")), len(text) - len(text.rstrip(" "))
+            else:
+                lead, trail = len(text), 0
+            self.queue.extend([{"key": "space"}] * lead)
+            if core:
+                self.queue.append({"paste": core})
+            self.queue.extend([{"key": "space"}] * trail)
+        else:
+            self.queue.append(msg)
         self._pump()
 
     def _pump(self):
@@ -121,8 +135,8 @@ class Typer:
             return
         self.busy = True
         msg = self.queue.pop(0)
-        if "text" in msg:
-            self.clip.set_text(msg["text"], -1)
+        if "paste" in msg:
+            self.clip.set_text(msg["paste"], -1)
             GLib.timeout_add(60, self._paste)
         elif "back" in msg:
             for _ in range(int(msg["back"])):
