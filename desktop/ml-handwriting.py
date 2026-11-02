@@ -35,6 +35,9 @@ from Xlib import X, XK, display, protocol  # noqa: E402
 from Xlib.ext import xtest  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ICON_IDLE = os.path.join(ROOT, "icon-512.png")
+ICON_REC = [os.path.join(ROOT, f"icon-recording-{i}.png") for i in range(4)]   # red, pulsing: the microphone is on
+PULSE_MS = 300
 PORT = 18765
 SERVED = {"/", "/index.html", "/manifest.json", "/sw.js", "/icon-180.png", "/icon-512.png"}
 DATA_DIR = os.path.expanduser("~/.local/share/ml-handwriting")
@@ -190,7 +193,8 @@ class App:
             return None
         icon = XApp.StatusIcon()
         icon.set_name("ml-handwriting")
-        icon.set_icon_name(os.path.join(ROOT, "icon-512.png"))
+        self.tray_icon = ICON_IDLE
+        icon.set_icon_name(ICON_IDLE)
         icon.set_tooltip_text("Malayalam Handwriting")
         menu = Gtk.Menu()
         item_toggle = Gtk.MenuItem(label="Show / hide")
@@ -204,6 +208,28 @@ class App:
         icon.connect("activate", self.on_tray_activate)
         icon.set_visible(True)
         return icon
+
+    def set_recording(self, on):
+        """Red tray icon while the microphone is listening."""
+        if not self.tray:
+            return
+        if getattr(self, "pulse_id", None):
+            GLib.source_remove(self.pulse_id)
+            self.pulse_id = None
+        if on:
+            self.frame = 0
+            self.pulse()
+            self.pulse_id = GLib.timeout_add(PULSE_MS, self.pulse)   # glow: step through the red frames
+        else:
+            self.tray_icon = ICON_IDLE
+            self.tray.set_icon_name(self.tray_icon)
+        self.tray.set_tooltip_text("Malayalam Handwriting - listening" if on else "Malayalam Handwriting")
+
+    def pulse(self):
+        self.tray_icon = ICON_REC[self.frame % len(ICON_REC)]
+        self.tray.set_icon_name(self.tray_icon)
+        self.frame += 1
+        return True
 
     def on_tray_activate(self, _icon, button, _time):
         if button == Gdk.BUTTON_PRIMARY:
@@ -260,6 +286,8 @@ class App:
         if "log" in msg:
             with open(LOG_FILE, "a", encoding="utf-8") as f:
                 f.write(time.strftime("%H:%M:%S ") + str(msg["log"]) + "\n")
+        elif "rec" in msg:
+            self.set_recording(bool(msg["rec"]))
         elif "clip" in msg:
             self.typer.clip.set_text(str(msg["clip"]), -1)
             self.typer.clip.store()

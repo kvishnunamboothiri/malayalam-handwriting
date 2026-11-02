@@ -585,10 +585,13 @@
   }
 
   async function startRecording() {
+    dbg("opening the microphone");
     const stream = await openStream();
+    dbg("microphone opened");
     const AC = window.AudioContext || window.webkitAudioContext;
     const ac = new AC();
     await ac.resume();
+    dbg("audio context running");
     const rate = ac.sampleRate;
     const block = 4096 / rate;
     const meter = $("meter"), bar = meter.firstElementChild;
@@ -673,6 +676,7 @@
     recorder.stop();
     recorder = null;
     mic.classList.remove("on");
+    emit({ rec: false });
     pending.then(() => { if (!recorder && !statusEl.classList.contains("err")) setStatus(""); });
   }
 
@@ -749,6 +753,7 @@
     try {
       await startRecording();
       mic.classList.add("on");
+      emit({ rec: true });      // the Linux app turns its tray icon red while the microphone is on
       setStatus(LISTEN_MSG);
     } catch (err) {
       setStatus(err && err.name === "NotAllowedError" ? "Microphone permission denied." : "Can't use the microphone: " + (err.message || err), true);
