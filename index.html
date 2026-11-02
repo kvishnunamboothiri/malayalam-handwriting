@@ -136,7 +136,10 @@
   }
   #bar button:active { background: var(--chip); }
   #bar #mic.on { background: #c0392b; border-color: #c0392b; color: #fff; }
-  #bar #cut, #bar #copy { flex: 1 1 45%; font-weight: 600; }
+  #bar #brk { flex-basis: 100%; height: 0; margin-top: -8px; }
+  #bar #kbd { flex: 0 0 56px; font-size: 22px; }
+  #bar #kbd.on { background: var(--chip); border-color: var(--accent); }
+  #bar #cut, #bar #copy { flex: 1 1 30%; font-weight: 600; }
   #bar #copy { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   #settings { border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; text-decoration: underline; padding: 2px; align-self: center; }
   dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); width: min(92vw, 420px); padding: 16px; }
@@ -166,6 +169,8 @@
     <button id="space" type="button">Space</button>
     <button id="back" type="button">⌫</button>
     <button id="mic" type="button" aria-label="Voice input">🎤</button>
+    <span id="brk"></span>
+    <button id="kbd" type="button" aria-label="Keyboard">⌨</button>
     <button id="cut" type="button">Cut</button>
     <button id="copy" type="button">Copy</button>
   </div>
@@ -636,6 +641,19 @@
       else { localStorage.removeItem("ml-hw-model"); localStorage.removeItem("ml-hw-model-set"); }
     } catch {}
   });
+
+  // Keyboard button: shows or hides the iOS keyboard for typing into the text box.
+  const kbd = $("kbd");
+  let kbdWasOpen = false;
+  kbd.addEventListener("pointerdown", (e) => {
+    kbdWasOpen = document.activeElement === text;
+    e.preventDefault();          // keep focus where it is until the click is handled
+  });
+  kbd.addEventListener("click", () => {
+    if (kbdWasOpen) text.blur(); else text.focus();
+  });
+  text.addEventListener("focus", () => kbd.classList.add("on"));
+  text.addEventListener("blur", () => kbd.classList.remove("on"));
 
   function save() { try { localStorage.setItem("ml-hw-text", text.value); } catch {} }
   text.addEventListener("input", save);
