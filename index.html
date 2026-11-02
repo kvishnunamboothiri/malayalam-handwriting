@@ -69,6 +69,15 @@
     -webkit-user-select: text;
     user-select: text;
   }
+  #textwrap { position: relative; }
+  #wipe {
+    position: absolute; top: 6px; right: 6px;
+    width: 32px; height: 32px; border: 0; border-radius: 50%;
+    background: var(--chip); color: var(--muted);
+    font: inherit; font-size: 15px; line-height: 1; padding: 0;
+  }
+  #wipe[hidden] { display: none; }
+  #text { padding-right: 46px; }
   #text:focus { outline: 2px solid var(--accent); outline-offset: 0; }
   #cands {
     display: flex;
@@ -144,6 +153,7 @@
   #bar #kbd.on { background: var(--chip); border-color: var(--accent); }
   #bar #undo, #bar #clear, #bar #cut, #bar #copy { flex: 1 1 20%; }
   #bar #cut, #bar #copy { font-weight: 600; }
+  .desk #bar #cut, .desk #bar #copy { display: none; }
   #bar #copy { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   #settings { border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; text-decoration: underline; padding: 2px; align-self: center; }
   dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); width: min(92vw, 420px); padding: 16px; }
@@ -156,8 +166,9 @@
   dialog .row button { border: 1px solid var(--line); border-radius: 10px; background: var(--chip); color: var(--ink); font: inherit; padding: 10px 18px; }
   dialog .row #dlg-save { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   .kb body { padding-top: 8px; padding-bottom: 8px; gap: 6px; }
-  .kb #text { min-height: 56px; max-height: 56px; font-size: 20px; padding: 6px 10px; }
+  .kb #text { min-height: 56px; max-height: 56px; font-size: 20px; padding: 6px 42px 6px 10px; }
   .kb #cands { min-height: 44px; }
+  .kb #wipe { top: 4px; right: 4px; width: 28px; height: 28px; }
   .kb #padwrap { min-height: 70px; }
   .kb #bar { gap: 6px; }
   .kb #bar button { min-height: 40px; }
@@ -169,7 +180,10 @@
 </style>
 </head>
 <body>
-  <textarea id="text" rows="3" placeholder="എഴുതിയ വാക്കുകൾ ഇവിടെ വരും" spellcheck="false" autocomplete="off" autocorrect="off"></textarea>
+  <div id="textwrap">
+    <textarea id="text" rows="3" placeholder="എഴുതിയ വാക്കുകൾ ഇവിടെ വരും" spellcheck="false" autocomplete="off" autocorrect="off"></textarea>
+    <button id="wipe" type="button" aria-label="Clear text" hidden>✕</button>
+  </div>
   <div id="cands" aria-live="polite"><span class="hint">Write a word below</span></div>
   <div id="padwrap">
     <canvas id="pad"></canvas>
@@ -205,6 +219,11 @@
   const IDLE_MS = 700;
 
   const $ = (id) => document.getElementById(id);
+
+  // Desktop bridge: inside the Linux app, text and keys are also sent to the window you are typing in.
+  const host = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.mlbridge;
+  const emit = (msg) => { if (host) host.postMessage(JSON.stringify(msg)); };
+  if (host) document.documentElement.classList.add("desk");
   const pad = $("pad"), ctx = pad.getContext("2d");
   const text = $("text"), cands = $("cands"), statusEl = $("status");
   const placeholder = $("placeholder");
@@ -360,6 +379,7 @@
     text.setRangeText(s, a, b, "end");
     text.scrollTop = text.scrollHeight;
     save();
+    emit({ text: s });
   }
 
   // Double space gives a full stop, as on the iPhone keyboard: "word " + Space becomes "word. ".
@@ -369,6 +389,8 @@
     if (a === b && /[^\s.,;:!?।] $/.test(text.value.slice(0, a))) {
       text.setRangeText(". ", a - 1, a, "end");
       save();
+      emit({ back: 1 });
+      emit({ text: ". " });
     } else {
       insert(" ");
     }
@@ -410,6 +432,7 @@
     addSpace();
   });
   $("back").addEventListener("click", () => {
+    emit({ back: 1 });
     const a = text.selectionStart, b = text.selectionEnd;
     if (a !== b) { text.setRangeText("", a, b, "end"); }
     else if (a > 0) {
@@ -663,14 +686,26 @@
     e.preventDefault();          // keep focus where it is until the click is handled
   });
   kbd.addEventListener("click", () => {
+    if (host) { emit({ key: "Return" }); return; }   // in the desktop app this button is Enter
     if (kbdWasOpen) text.blur(); else text.focus();
   });
+  if (host) { kbd.textContent = "↵"; kbd.setAttribute("aria-label", "Enter"); }
   text.addEventListener("focus", () => kbd.classList.add("on"));
   text.addEventListener("blur", () => kbd.classList.remove("on"));
 
-  function save() { try { localStorage.setItem("ml-hw-text", text.value); } catch {} }
+  function save() {
+    try { localStorage.setItem("ml-hw-text", text.value); } catch {}
+    $("wipe").hidden = !text.value;
+  }
+  $("wipe").addEventListener("click", () => {
+    text.value = "";
+    save();
+    setStatus("Text cleared");
+    setTimeout(() => { if (statusEl.textContent === "Text cleared") setStatus(""); }, 1500);
+  });
   text.addEventListener("input", save);
   try { text.value = localStorage.getItem("ml-hw-text") || ""; } catch {}
+  $("wipe").hidden = !text.value;
 
   // Keep the layout inside the area above the keyboard.
   function fit() {
