@@ -196,6 +196,8 @@
   let t0 = 0;
   let timer = null;
   let reqId = 0;
+  let lastCands = [];        // candidates for the strokes currently on the pad
+  let candsCount = 0;        // how many strokes those candidates were recognised from
   let cssW = 0, cssH = 0;
 
   function resize() {
@@ -235,6 +237,7 @@
   pad.addEventListener("pointerdown", (e) => {
     pad.setPointerCapture(e.pointerId);
     clearTimeout(timer);
+    candsCount = 0;   // the old candidates no longer match the ink
     if (!strokes.length) t0 = performance.now();
     const [x, y] = pt(e);
     current = { x: [x], y: [y], t: [Math.round(performance.now() - t0)] };
@@ -266,6 +269,7 @@
   async function recognise() {
     if (!strokes.length) return;
     const id = ++reqId;
+    const count = strokes.length;
     const ink = strokes.map((s) => [s.x.map(Math.round), s.y.map(Math.round), s.t]);
     const body = {
       app_version: 0.4,
@@ -292,7 +296,9 @@
       const data = await res.json();
       if (id !== reqId) return;
       if (data[0] !== "SUCCESS") throw new Error(data[0]);
-      showCandidates(data[1][0][1]);
+      lastCands = data[1][0][1] || [];
+      candsCount = count;
+      showCandidates(lastCands);
       setStatus("");
     } catch (err) {
       if (id !== reqId) return;
@@ -342,6 +348,7 @@
     clearTimeout(timer);
     reqId++;
     strokes = []; current = null;
+    lastCands = []; candsCount = 0;
     redraw();
   }
 
@@ -353,6 +360,7 @@
   $("undo").addEventListener("click", () => {
     clearTimeout(timer);
     strokes.pop();
+    candsCount = 0;
     redraw();
     if (strokes.length) timer = setTimeout(recognise, 150);
     else { reqId++; cands.innerHTML = ""; cands.append(hint("Write a word below")); }
@@ -361,7 +369,16 @@
     resetPad();
     cands.innerHTML = ""; cands.append(hint("Write a word below"));
   });
-  $("space").addEventListener("click", () => insert(" "));
+  // Space accepts the first candidate for whatever is on the pad, then adds the space.
+  $("space").addEventListener("click", async () => {
+    if (strokes.length) {
+      clearTimeout(timer);
+      if (candsCount !== strokes.length) await recognise();
+      if (candsCount !== strokes.length || !lastCands.length) return;  // recognition failed: keep the ink, show why
+      commit(lastCands[0]);
+    }
+    insert(" ");
+  });
   $("back").addEventListener("click", () => {
     const a = text.selectionStart, b = text.selectionEnd;
     if (a !== b) { text.setRangeText("", a, b, "end"); }
