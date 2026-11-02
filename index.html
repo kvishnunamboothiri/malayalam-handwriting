@@ -172,6 +172,7 @@
   dialog h2 { margin: 0 0 6px; font-size: 18px; }
   dialog p { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
   dialog label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+  dialog select { display: block; width: 100%; margin-top: 4px; padding: 10px; font-size: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); }
   dialog input { display: block; width: 100%; margin-top: 4px; padding: 10px; font-size: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); -webkit-user-select: text; user-select: text; }
   dialog .row { display: flex; gap: 8px; justify-content: flex-end; }
   dialog .row button { border: 1px solid var(--line); border-radius: 10px; background: var(--chip); color: var(--ink); font: inherit; padding: 10px 18px; }
@@ -227,6 +228,7 @@
       <h2>Voice input (Google Gemini)</h2>
       <p>Paste a free API key from <b>aistudio.google.com/apikey</b>. It is stored only on this device.</p>
       <label>API key<input id="key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+      <label>Microphone<select id="micsel"><option value="">Automatic</option></select></label>
       <label>Model<input id="model" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
       <div class="row"><button value="cancel">Cancel</button><button id="dlg-save" value="save">Save</button></div>
     </form>
@@ -551,8 +553,34 @@
   const MAX_PHRASE = 25;     // seconds; longer phrases are cut here
   let pending = Promise.resolve();   // transcriptions run one after another so the text stays in order
 
+  const getMic = () => { try { return localStorage.getItem("ml-hw-mic") || ""; } catch { return ""; } };
+
+  async function openStream() {
+    const base = { echoCancellation: true, noiseSuppression: true };
+    const id = getMic();
+    if (id) {
+      try { return await navigator.mediaDevices.getUserMedia({ audio: { ...base, deviceId: { exact: id } } }); }
+      catch { /* that microphone is gone: fall back to the automatic one */ }
+    }
+    return navigator.mediaDevices.getUserMedia({ audio: base });
+  }
+
+  async function fillMics() {
+    const sel = $("micsel");
+    try {
+      let devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput");
+      if (devs.some((d) => !d.label)) {          // names only appear once the microphone has been allowed
+        (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach((t) => t.stop());
+        devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput");
+      }
+      sel.length = 1;
+      for (const d of devs) sel.add(new Option(d.label || "Microphone", d.deviceId));
+      sel.value = [...sel.options].some((o) => o.value === getMic()) ? getMic() : "";
+    } catch { /* leave just "Automatic" */ }
+  }
+
   async function startRecording() {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    const stream = await openStream();
     const AC = window.AudioContext || window.webkitAudioContext;
     const ac = new AC();
     await ac.resume();
@@ -567,7 +595,9 @@
     let pre = [];          // the last few blocks before speech starts, so the first syllable isn't clipped
     let seg = null;        // blocks of the phrase being spoken
     let voiced = 0, quiet = 0, idle = 0, segSec = 0;
-    let noise = 0.002;     // running estimate of background level (microphones differ a lot, so this adapts)
+    let noise = 0.002;     // background level: measured in the first moments, then followed up and down
+    let elapsed = 0, loudest = 0, warned = false;
+    const micName = stream.getAudioTracks()[0].label || "the microphone";
 
     function flush() {
       const chunks = seg, enough = voiced >= 0.25;
@@ -583,7 +613,15 @@
       let sum = 0;
       for (let i = 0; i < d.length; i++) sum += d[i] * d[i];
       const rms = Math.sqrt(sum / d.length);
-      const loud = rms > Math.max(0.004, noise * 3);
+      const loud = !calibrating && rms > Math.max(0.004, noise * 3);
+      elapsed += block; loudest = Math.max(loudest, rms);
+      const calibrating = elapsed <= 0.4;
+      if (calibrating) noise = elapsed <= block * 1.01 ? rms : Math.min(noise, rms);
+      if (!warned && elapsed >= 3 && loudest < 0.0015) {
+        warned = true;
+        dbg("no sound from " + micName + " (loudest " + loudest.toFixed(4) + ")");
+        setStatus("No sound from \"" + micName + "\". Is it the right microphone? Choose it in Voice settings.", true);
+      }
       bar.style.width = Math.min(100, rms * 1500) + "%";
       meter.classList.toggle("hear", loud);
       if (!seg) {
@@ -593,7 +631,6 @@
           seg = pre; pre = [];
           segSec = seg.length * block; voiced = block; quiet = 0;
         } else {
-          noise = 0.95 * noise + 0.05 * rms;
           idle += block;
           if (idle >= IDLE_STOP) stopRecording();
         }
@@ -603,6 +640,8 @@
         if (loud) { voiced += block; quiet = 0; } else quiet += block;
         if (quiet >= END_SILENCE || segSec >= MAX_PHRASE) flush();
       }
+      // Fall quickly, rise slowly: steady room noise is learned, a spoken phrase barely moves it.
+      if (!calibrating) noise = rms < noise ? 0.8 * noise + 0.2 * rms : noise * 1.01;
     };
     src.connect(proc);
     proc.connect(ac.destination);
@@ -711,12 +750,15 @@
     $("model").value = getModel();
     emit({ focus: true });      // the Linux app only takes keyboard focus while this dialog is open
     dlg.showModal();
+    fillMics();
   }
   dlg.addEventListener("close", () => emit({ focus: false }));
   $("settings").addEventListener("click", openSettings);
   $("dlg-save").addEventListener("click", () => {
     try {
       localStorage.setItem("ml-hw-key", $("key").value.trim());
+      const micId = $("micsel").value;
+      if (micId) localStorage.setItem("ml-hw-mic", micId); else localStorage.removeItem("ml-hw-mic");
       const m = $("model").value.trim();
       if (m && m !== DEFAULT_MODEL) { localStorage.setItem("ml-hw-model", m); localStorage.setItem("ml-hw-model-set", "1"); }
       else { localStorage.removeItem("ml-hw-model"); localStorage.removeItem("ml-hw-model-set"); }

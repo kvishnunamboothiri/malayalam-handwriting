@@ -141,7 +141,7 @@ class App:
         self.view.load_uri(f"http://localhost:{PORT}/")
 
         win = Gtk.Window(title="Malayalam Handwriting")
-        win.set_default_size(420, 560)
+        win.set_default_size(430, 700)   # tall enough to show every row, including the language switch
         win.set_accept_focus(False)        # clicks here must not steal focus from the window you type in
         win.set_focus_on_map(False)
         win.set_keep_above(True)
