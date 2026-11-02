@@ -122,9 +122,9 @@
     font-size: 18px;
     pointer-events: none;
   }
-  #bar { display: flex; gap: 8px; }
+  #bar { display: flex; flex-wrap: wrap; gap: 8px; }
   #bar button {
-    flex: 1;
+    flex: 1 1 15%;
     border: 1px solid var(--line);
     border-radius: 12px;
     background: var(--panel);
@@ -136,7 +136,8 @@
   }
   #bar button:active { background: var(--chip); }
   #bar #mic.on { background: #c0392b; border-color: #c0392b; color: #fff; }
-  #bar #copy { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); flex: 1.4; font-weight: 600; }
+  #bar #cut, #bar #copy { flex: 1 1 45%; font-weight: 600; }
+  #bar #copy { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   #settings { border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; text-decoration: underline; padding: 2px; align-self: center; }
   dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); width: min(92vw, 420px); padding: 16px; }
   dialog::backdrop { background: rgba(0,0,0,.45); }
@@ -165,6 +166,7 @@
     <button id="space" type="button">Space</button>
     <button id="back" type="button">⌫</button>
     <button id="mic" type="button" aria-label="Voice input">🎤</button>
+    <button id="cut" type="button">Cut</button>
     <button id="copy" type="button">Copy</button>
   </div>
   <div id="status"></div>
@@ -370,7 +372,7 @@
     }
     save();
   });
-  $("copy").addEventListener("click", async () => {
+  async function copyText(clear) {
     const v = text.value;
     if (!v) return;
     try {
@@ -379,9 +381,17 @@
       text.focus(); text.select(); document.execCommand("copy");
       text.setSelectionRange(v.length, v.length);
     }
-    setStatus("Copied");
-    setTimeout(() => setStatus(""), 1500);
-  });
+    let msg = "Copied";
+    if (clear) {
+      text.value = "";
+      save();
+      msg = "Cut: copied and cleared";
+    }
+    setStatus(msg);
+    setTimeout(() => { if (statusEl.textContent === msg) setStatus(""); }, 1500);
+  }
+  $("copy").addEventListener("click", () => copyText(false));
+  $("cut").addEventListener("click", () => copyText(true));
 
   // Voice: record audio, send to Google's Gemini API for Malayalam transcription.
   const mic = $("mic");
