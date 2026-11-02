@@ -127,7 +127,7 @@
     border-top: 1px dashed var(--line);
     pointer-events: none;
   }
-  #meter { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; background: var(--chip); display: none; pointer-events: none; }
+  #meter { position: absolute; left: 0; right: 0; bottom: 0; height: 8px; background: var(--line); display: none; pointer-events: none; }
   #meter.on { display: block; }
   #meter i { display: block; height: 100%; width: 0; background: var(--muted); }
   #meter.hear i { background: #2e9d5b; }
@@ -596,7 +596,7 @@
     let seg = null;        // blocks of the phrase being spoken
     let voiced = 0, quiet = 0, idle = 0, segSec = 0;
     let noise = 0.002;     // background level: measured in the first moments, then followed up and down
-    let elapsed = 0, loudest = 0, warned = false;
+    let elapsed = 0, loudest = 0, warned = false, secMax = 0, lastLog = 0, logLines = 0;
     const micName = stream.getAudioTracks()[0].label || "the microphone";
 
     function flush() {
@@ -613,16 +613,22 @@
       let sum = 0;
       for (let i = 0; i < d.length; i++) sum += d[i] * d[i];
       const rms = Math.sqrt(sum / d.length);
-      const loud = !calibrating && rms > Math.max(0.004, noise * 3);
       elapsed += block; loudest = Math.max(loudest, rms);
+      secMax = Math.max(secMax, rms);
       const calibrating = elapsed <= 0.4;
       if (calibrating) noise = elapsed <= block * 1.01 ? rms : Math.min(noise, rms);
+      const loud = !calibrating && rms > Math.max(0.004, noise * 1.8);   // raw microphones may only be 2-3x louder than their own noise
+      if (elapsed - lastLog >= 1 && logLines < 40) {
+        lastLog = elapsed; logLines++;
+        dbg("level: loudest in last second " + secMax.toFixed(4) + ", noise " + noise.toFixed(4) + ", threshold " + Math.max(0.004, noise * 1.8).toFixed(4));
+        secMax = 0;
+      }
       if (!warned && elapsed >= 3 && loudest < 0.0015) {
         warned = true;
         dbg("no sound from " + micName + " (loudest " + loudest.toFixed(4) + ")");
         setStatus("No sound from \"" + micName + "\". Is it the right microphone? Choose it in Voice settings.", true);
       }
-      bar.style.width = Math.min(100, rms * 1500) + "%";
+      bar.style.width = Math.min(100, rms * 3000) + "%";
       meter.classList.toggle("hear", loud);
       if (!seg) {
         pre.push(d);
@@ -641,7 +647,7 @@
         if (quiet >= END_SILENCE || segSec >= MAX_PHRASE) flush();
       }
       // Fall quickly, rise slowly: steady room noise is learned, a spoken phrase barely moves it.
-      if (!calibrating) noise = rms < noise ? 0.8 * noise + 0.2 * rms : noise * 1.01;
+      if (!calibrating) noise = rms < noise ? 0.8 * noise + 0.2 * rms : noise * (seg ? 1.003 : 1.01);
     };
     src.connect(proc);
     proc.connect(ac.destination);
