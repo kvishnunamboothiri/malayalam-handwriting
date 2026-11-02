@@ -83,9 +83,14 @@ First-time setup (once per computer)
 
 Using it
 --------
-* Tray icon: left-click shows or hides the window; right-click gives Show/hide and
-  Quit. The window's X button only hides it. Starting the app a second time just
-  shows the copy that is already running.
+* Tray icon: left-click shows or hides the window. Middle-click starts or stops
+  listening. Right-click gives "Start listening / Stop listening", "Show / hide
+  window" and "Quit". So you can dictate with the window hidden: start listening
+  from the tray, speak, and the text goes to the window you are using.
+  The window's X button only hides it. Starting the app a second time just shows
+  the copy that is already running.
+  (A hidden window is really just invisible and click-through; the browser engine
+  inside blocks the microphone for a truly hidden window.)
 * Language: the Malayalam / English switch at the bottom decides how handwriting
   and voice are read. Set it before you write or speak.
 * Voice: tap the microphone button once, speak, and pause for about a second; each

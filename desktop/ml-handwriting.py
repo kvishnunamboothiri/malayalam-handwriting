@@ -19,6 +19,7 @@ import threading
 import time
 import urllib.request
 
+import cairo
 import gi
 
 gi.require_version("Gtk", "3.0")
@@ -175,6 +176,7 @@ class App:
         settings = self.view.get_settings()
         settings.set_property("enable-media-stream", True)
         settings.set_property("enable-mediasource", True)
+        settings.set_property("media-playback-requires-user-gesture", False)   # the tray menu starts the microphone, not a click in the page
         self.view.connect("permission-request", self.on_permission)
         self.view.load_uri(f"http://localhost:{PORT}/")
 
@@ -191,14 +193,16 @@ class App:
         win.connect("destroy", Gtk.main_quit)
         win.connect("delete-event", self.on_close)
         self.win = win
+        self.ghosted = False
         self.previous = 0
         win.add(self.view)
         win.show_all()
         self.tray = self.make_tray()
         Handler.on_show = self.show
         GLib.timeout_add(400, self.remember_active)
+        self.shown = True
         if hidden and self.tray:
-            win.hide()
+            self.hide()
 
     # --- tray icon and showing / hiding -------------------------------------------------------
 
@@ -211,11 +215,13 @@ class App:
         icon.set_icon_name(ICON_IDLE)
         icon.set_tooltip_text("Malayalam Handwriting")
         menu = Gtk.Menu()
-        item_toggle = Gtk.MenuItem(label="Show / hide")
+        self.mic_item = Gtk.MenuItem(label="Start listening")
+        self.mic_item.connect("activate", lambda _i: self.toggle_mic())
+        item_toggle = Gtk.MenuItem(label="Show / hide window")
         item_toggle.connect("activate", lambda _i: self.toggle())
         item_quit = Gtk.MenuItem(label="Quit")
         item_quit.connect("activate", lambda _i: Gtk.main_quit())
-        for item in (item_toggle, Gtk.SeparatorMenuItem(), item_quit):
+        for item in (self.mic_item, item_toggle, Gtk.SeparatorMenuItem(), item_quit):
             menu.append(item)
         menu.show_all()
         icon.set_secondary_menu(menu)
@@ -238,6 +244,7 @@ class App:
             self.tray_icon = ICON_IDLE
             self.tray.set_icon_name(self.tray_icon)
         self.tray.set_tooltip_text("Malayalam Handwriting - listening" if on else "Malayalam Handwriting")
+        self.mic_item.set_label("Stop listening" if on else "Start listening")
 
     def pulse(self):
         self.tray_icon = ICON_REC[self.frame % len(ICON_REC)]
@@ -248,6 +255,23 @@ class App:
     def on_tray_activate(self, _icon, button, _time):
         if button == Gdk.BUTTON_PRIMARY:
             self.toggle()
+        elif button == Gdk.BUTTON_MIDDLE:
+            self.toggle_mic()
+
+    def toggle_mic(self):
+        """Start or stop listening from the tray, even while the window is hidden."""
+        def done(view, res):
+            try:
+                answer = view.run_javascript_finish(res).get_js_value().to_string()
+            except GLib.Error:
+                return
+            if answer == "nokey":
+                self.show()                         # no key yet: show the window so Voice settings can be filled in
+                self.view.run_javascript("document.getElementById('mic').click()", None, None, None)
+        self.view.run_javascript(
+            "(()=>{const m=document.getElementById('mic'); "
+            "if (!m.classList.contains('on') && !localStorage.getItem('ml-hw-key')) return 'nokey'; "
+            "m.click(); return 'ok';})()", None, done)
 
     def remember_active(self):
         """Note which window you are working in, so it gets focus back after the window is shown."""
@@ -266,24 +290,37 @@ class App:
         return gdk_win.get_xid() if gdk_win is not None and hasattr(gdk_win, "get_xid") else 0
 
     def toggle(self):
-        if self.win.get_visible():
+        if self.shown:
             self.hide()
         else:
             self.show()
 
     def show(self):
-        if not self.win.get_visible():
-            self.win.show()
+        if not self.shown:
+            self.shown = True
+            if self.ghosted:
+                self.win.set_opacity(1.0)
+                self.win.input_shape_combine_region(None)   # clickable again
+                self.win.set_skip_taskbar_hint(False)
+            else:
+                self.win.show()
         self.win.set_keep_above(True)
         GLib.timeout_add(150, lambda: (self.typer.activate(self.last_real), False)[1])   # keep typing where you were
         return False
 
     def hide(self):
-        # stop listening first so the microphone is not left on in a hidden window
-        self.view.run_javascript(
-            "(()=>{const m=document.getElementById('mic'); if (m && m.classList.contains('on')) m.click();})()",
-            None, None, None)
-        self.win.hide()
+        """Hide the window. It stays on screen but fully transparent and click-through, because the browser
+        engine blocks the microphone for a really hidden window and the tray menu can start listening."""
+        self.shown = False
+        screen = self.win.get_screen()
+        if screen is not None and screen.is_composited() and self.win.get_window() is not None:
+            self.ghosted = True
+            self.win.set_skip_taskbar_hint(True)
+            self.win.input_shape_combine_region(cairo.Region())   # clicks pass through
+            self.win.set_opacity(0.0)
+        else:
+            self.ghosted = False        # no transparency on this desktop: really hide (the microphone then stops working)
+            self.win.hide()
 
     def on_close(self, _win, _event):
         if self.tray:
