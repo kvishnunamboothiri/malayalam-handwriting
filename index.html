@@ -495,6 +495,10 @@
     const all = new Float32Array(len);
     let o = 0;
     for (const c of chunks) { all.set(c, o); o += c.length; }
+    let peak = 0;
+    for (let i = 0; i < all.length; i++) peak = Math.max(peak, Math.abs(all[i]));
+    const gain = peak > 0.005 ? Math.min(20, 0.8 / peak) : 1;   // quiet microphones (no auto gain) get boosted
+    for (let i = 0; i < all.length; i++) all[i] *= gain;
     const outRate = 16000;
     const ratio = inRate / outRate;
     const n = Math.floor(all.length / ratio);
@@ -554,7 +558,7 @@
     let pre = [];          // the last few blocks before speech starts, so the first syllable isn't clipped
     let seg = null;        // blocks of the phrase being spoken
     let voiced = 0, quiet = 0, idle = 0, segSec = 0;
-    let noise = 0.005;     // running estimate of background level
+    let noise = 0.002;     // running estimate of background level (microphones differ a lot, so this adapts)
 
     function flush() {
       const chunks = seg, enough = voiced >= 0.25;
@@ -569,7 +573,7 @@
       let sum = 0;
       for (let i = 0; i < d.length; i++) sum += d[i] * d[i];
       const rms = Math.sqrt(sum / d.length);
-      const loud = rms > Math.max(0.012, noise * 3);
+      const loud = rms > Math.max(0.004, noise * 3);
       if (!seg) {
         pre.push(d);
         if (pre.length > 3) pre.shift();
