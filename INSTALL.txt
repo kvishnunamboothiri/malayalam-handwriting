@@ -89,8 +89,9 @@ Using it
   from the tray, speak, and the text goes to the window you are using.
   The window's X button only hides it. Starting the app a second time just shows
   the copy that is already running.
-  (A hidden window is really just invisible and click-through; the browser engine
-  inside blocks the microphone for a truly hidden window.)
+  (A "hidden" window is shrunk to one invisible, click-through pixel in the bottom-right
+  corner of the screen, because the browser engine inside blocks the microphone for
+  a truly hidden window. It catches no clicks.)
 * Language: the Malayalam / English switch at the bottom decides how handwriting
   and voice are read. Set it before you write or speak.
 * Voice: tap the microphone button once, speak, and pause for about a second; each

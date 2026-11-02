@@ -194,6 +194,8 @@ class App:
         win.connect("delete-event", self.on_close)
         self.win = win
         self.ghosted = False
+        self.saved_size = (430, 500)
+        self.saved_pos = (0, 0)
         self.previous = 0
         win.add(self.view)
         win.show_all()
@@ -299,9 +301,13 @@ class App:
         if not self.shown:
             self.shown = True
             if self.ghosted:
-                self.win.set_opacity(1.0)
+                self.ghosted = False
+                self.win.set_decorated(True)
+                self.win.resize(*self.saved_size)
+                self.win.move(*self.saved_pos)
                 self.win.input_shape_combine_region(None)   # clickable again
                 self.win.set_skip_taskbar_hint(False)
+                self.win.set_opacity(1.0)
             else:
                 self.win.show()
         self.win.set_keep_above(True)
@@ -309,13 +315,20 @@ class App:
         return False
 
     def hide(self):
-        """Hide the window. It stays on screen but fully transparent and click-through, because the browser
-        engine blocks the microphone for a really hidden window and the tray menu can start listening."""
+        """Hide the window. The browser engine blocks the microphone for a really hidden window, and the tray
+        can start listening, so the window stays mapped but is shrunk to one transparent, click-through pixel
+        in the bottom-right corner of the screen, with no title bar or frame that could catch clicks."""
         self.shown = False
         screen = self.win.get_screen()
         if screen is not None and screen.is_composited() and self.win.get_window() is not None:
+            if not self.ghosted:
+                self.saved_size = self.win.get_size()
+                self.saved_pos = self.win.get_position()
             self.ghosted = True
+            self.win.set_decorated(False)
             self.win.set_skip_taskbar_hint(True)
+            self.win.resize(1, 1)
+            self.win.move(screen.get_width() - 1, screen.get_height() - 1)
             self.win.input_shape_combine_region(cairo.Region())   # clicks pass through
             self.win.set_opacity(0.0)
         else:
