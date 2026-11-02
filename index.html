@@ -344,6 +344,18 @@
     save();
   }
 
+  // Double space gives a full stop, as on the iPhone keyboard: "word " + Space becomes "word. ".
+  function addSpace() {
+    const a = text.selectionStart ?? text.value.length;
+    const b = text.selectionEnd ?? a;
+    if (a === b && /[^\s.,;:!?।] $/.test(text.value.slice(0, a))) {
+      text.setRangeText(". ", a - 1, a, "end");
+      save();
+    } else {
+      insert(" ");
+    }
+  }
+
   function resetPad() {
     clearTimeout(timer);
     reqId++;
@@ -377,7 +389,7 @@
       if (candsCount !== strokes.length || !lastCands.length) return;  // recognition failed: keep the ink, show why
       commit(lastCands[0]);
     }
-    insert(" ");
+    addSpace();
   });
   $("back").addEventListener("click", () => {
     const a = text.selectionStart, b = text.selectionEnd;
