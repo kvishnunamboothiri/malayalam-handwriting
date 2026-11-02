@@ -466,7 +466,7 @@
 
   // Hands-free listening: a pause after speech sends that phrase for transcription while listening continues.
   const LISTEN_MSG = "Listening… speak, then pause. Tap the mic to stop.";
-  const END_SILENCE = 1.2;   // seconds of quiet that end a phrase
+  const END_SILENCE = 0.7;   // seconds of quiet that end a phrase
   const IDLE_STOP = 15;      // stop listening after this long with no speech
   const MAX_PHRASE = 25;     // seconds; longer phrases are cut here
   let pending = Promise.resolve();   // transcriptions run one after another so the text stays in order
