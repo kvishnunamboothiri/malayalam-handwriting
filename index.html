@@ -160,7 +160,6 @@
   #bar #kbd.on { background: var(--chip); border-color: var(--accent); }
   #bar #undo, #bar #clear, #bar #cut, #bar #copy { flex: 1 1 20%; }
   #bar #cut, #bar #copy { font-weight: 600; }
-  .desk #bar #cut, .desk #bar #copy { display: none; }
   /* On the desktop dictation is the main use: small writing pad, large microphone button. */
   .desk #padwrap { min-height: 110px; }
   .desk #text { height: 64px; min-height: 64px; max-height: 64px; }
@@ -476,7 +475,8 @@
     const v = text.value;
     if (!v) return;
     try {
-      await navigator.clipboard.writeText(v);
+      if (host) emit({ clip: v });     // the Linux app copies for us: its window never has keyboard focus
+      else await navigator.clipboard.writeText(v);
     } catch {
       text.focus(); text.select(); document.execCommand("copy");
       text.setSelectionRange(v.length, v.length);

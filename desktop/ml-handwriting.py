@@ -165,6 +165,9 @@ class App:
         if "log" in msg:
             with open(LOG_FILE, "a", encoding="utf-8") as f:
                 f.write(time.strftime("%H:%M:%S ") + str(msg["log"]) + "\n")
+        elif "clip" in msg:
+            self.typer.clip.set_text(str(msg["clip"]), -1)
+            self.typer.clip.store()
         elif "focus" in msg:
             self.set_focus_mode(bool(msg["focus"]))
         else:
