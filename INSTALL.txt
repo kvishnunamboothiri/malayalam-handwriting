@@ -16,6 +16,8 @@ What you need
 * A free Gemini API key for voice input (handwriting needs no key). See
   "How to get a Gemini API key" below.
 * A microphone, for voice input.
+* Optional: Google Chrome, for the "Google speech through Chrome" voice engine
+  (see "Voice engines" below).
 
 How to get a Gemini API key
 ---------------------------
@@ -42,6 +44,19 @@ Notes
   - On the free plan Google may use what you send to improve its products, so
     avoid dictating anything private. Daily limits apply; if you see "quota" or
     "high demand" errors, wait a while and try again.
+
+Voice engines (Linux app)
+-------------------------
+Voice settings has a "Voice engine" choice:
+  * Gemini (needs the API key): the app records short phrases and Google's Gemini
+    model writes them out. Needs the key described above.
+  * Google speech through Chrome (no key): the app starts Chrome hidden in the
+    background and uses Google's speech recognition, the same kind of engine that
+    Android voice typing uses. Words appear as you speak, it ignores room noise much
+    better, and it needs no API key. It needs Google Chrome installed and internet.
+    Chrome only does the listening; you never see its window. Stopping the
+    microphone in the app also stops Chrome.
+Try both and keep the one that suits your voice and room.
 
 Install
 -------

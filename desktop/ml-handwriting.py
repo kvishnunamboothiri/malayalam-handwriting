@@ -13,7 +13,11 @@ import functools
 import http.server
 import json
 import os
+import secrets
+import shutil
+import signal
 import socketserver
+import subprocess
 import sys
 import threading
 import time
@@ -40,16 +44,33 @@ ICON_IDLE = os.path.join(ROOT, "icon-512.png")
 ICON_REC = [os.path.join(ROOT, f"icon-recording-{i}.png") for i in range(4)]   # red, pulsing: the microphone is on
 PULSE_MS = 300
 PORT = 18765
-SERVED = {"/", "/index.html", "/manifest.json", "/sw.js", "/icon-180.png", "/icon-512.png"}
+SERVED = {"/", "/index.html", "/manifest.json", "/sw.js", "/icon-180.png", "/icon-512.png", "/stt.html"}
 DATA_DIR = os.path.expanduser("~/.local/share/ml-handwriting")
 LOG_FILE = os.path.expanduser("~/.cache/ml-handwriting/debug.log")
 CACHE_DIR = os.path.expanduser("~/.cache/ml-handwriting")
+CHROME_DIR = os.path.expanduser("~/.local/share/ml-handwriting/chrome-speech")
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     """Serves only the web app's own files, never the rest of the folder (such as .git)."""
 
     on_show = None   # set by the app: called when a second copy asks the first one to show itself
+    on_stt = None    # set by the app: called with what the hidden Chrome speech helper reports
+    stt_token = ""   # secret handed only to the helper, so other pages on this computer cannot inject text
+
+    def do_POST(self):
+        if self.path != "/__stt" or not Handler.stt_token or self.headers.get("X-ML-Token") != Handler.stt_token:
+            self.send_error(403)
+            return
+        try:
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self.send_error(400)
+            return
+        if Handler.on_stt and isinstance(body, dict):
+            GLib.idle_add(Handler.on_stt, body)
+        self.send_response(200)
+        self.end_headers()
 
     def do_GET(self):
         if self.path == "/__show":
@@ -160,6 +181,55 @@ class Typer:
         return False
 
 
+class ChromeSpeech:
+    """Runs Chrome hidden with a small page that uses Google's speech recognition (the engine behind
+    Chrome and Android voice typing) and reports the words back to this app."""
+
+    def __init__(self):
+        self.proc = None
+        self.token = secrets.token_urlsafe(16)
+
+    @staticmethod
+    def find_chrome():
+        for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
+            path = shutil.which(name)
+            if path:
+                return path
+        return None
+
+    def start(self, lang):
+        """Returns None when started, or a short message saying why not."""
+        self.stop()
+        chrome = self.find_chrome()
+        if not chrome:
+            return "Google Chrome is not installed, so this engine is not available."
+        os.makedirs(CHROME_DIR, exist_ok=True)
+        url = f"http://127.0.0.1:{PORT}/stt.html?t={self.token}&lang={lang}"
+        self.proc = subprocess.Popen(
+            [chrome, "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+             "--use-fake-ui-for-media-stream", f"--user-data-dir={CHROME_DIR}", url],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        return None
+
+    def alive(self):
+        return self.proc is not None and self.proc.poll() is None
+
+    def stop(self):
+        if self.proc is not None:
+            try:
+                os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)   # Chrome starts several processes
+            except (ProcessLookupError, PermissionError):
+                pass
+            try:
+                self.proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(os.getpgid(self.proc.pid), signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+            self.proc = None
+
+
 class App:
     def __init__(self, hidden=False):
         self.typer = Typer()
@@ -199,6 +269,11 @@ class App:
         self.has_focus_mode = False # this window currently holds the keyboard
         self.held = []              # words waiting while focus is handed back to the other window
         self.releasing = False
+        self.speech = ChromeSpeech()
+        self.speech_wanted = False
+        self.speech_idle = 0
+        Handler.stt_token = self.speech.token
+        Handler.on_stt = self.on_speech
         win.add(self.view)
         win.show_all()
         self.tray = self.make_tray()
@@ -274,7 +349,7 @@ class App:
                 self.view.run_javascript("document.getElementById('mic').click()", None, None, None)
         self.view.run_javascript(
             "(()=>{const m=document.getElementById('mic'); "
-            "if (!m.classList.contains('on') && !localStorage.getItem('ml-hw-key')) return 'nokey'; "
+            "if (!m.classList.contains('on') && localStorage.getItem('ml-hw-engine') !== 'chrome' && !localStorage.getItem('ml-hw-key')) return 'nokey'; "
             "m.click(); return 'ok';})()", None, done)
 
     def remember_active(self):
@@ -352,6 +427,8 @@ class App:
                 f.write(time.strftime("%H:%M:%S ") + str(msg["log"]) + "\n")
         elif "rec" in msg:
             self.set_recording(bool(msg["rec"]))
+        elif "stt" in msg:
+            self.speech_control(msg)
         elif "clip" in msg:
             self.typer.clip.set_text(str(msg["clip"]), -1)
             self.typer.clip.store()
@@ -359,6 +436,61 @@ class App:
             self.set_focus_mode(bool(msg["focus"]))
         else:
             self.deliver(msg)
+
+    # --- Google speech through the hidden Chrome helper ------------------------------------------
+
+    def call_page(self, function, arg):
+        self.view.run_javascript(f"window.{function} && window.{function}({json.dumps(arg)})", None, None, None)
+
+    def speech_control(self, msg):
+        if msg["stt"] == "start":
+            lang = msg.get("lang") if msg.get("lang") in ("ml-IN", "en-IN") else "ml-IN"
+            problem = self.speech.start(lang)
+            if problem:
+                self.call_page("__sttStopped", problem)
+                return
+            self.speech_wanted = True
+            self.speech_idle = 0
+            GLib.timeout_add(1000, self.speech_watch)
+        else:
+            self.speech_wanted = False
+            self.speech.stop()
+
+    def speech_watch(self):
+        """Notice if the helper died, and switch the microphone off after a long time with no speech."""
+        if not self.speech_wanted:
+            return False
+        self.speech_idle += 1
+        if not self.speech.alive():
+            self.speech_wanted = False
+            self.call_page("__sttStopped", "The speech helper stopped unexpectedly.")
+            return False
+        if self.speech_idle >= 180:
+            self.speech_wanted = False
+            self.speech.stop()
+            self.call_page("__sttStopped", "Stopped listening after three minutes of silence.")
+            return False
+        return True
+
+    def on_speech(self, report):
+        if "final" in report:
+            self.speech_idle = 0
+            self.call_page("__sttFinal", str(report["final"]))
+        elif "interim" in report:
+            self.speech_idle = 0
+            self.call_page("__sttInterim", str(report["interim"]))
+        elif "error" in report:
+            reasons = {
+                "not-allowed": "Chrome was not allowed to use the microphone.",
+                "service-not-allowed": "Google speech recognition is not allowed in this Chrome.",
+                "network": "Google speech recognition could not be reached. Check the internet connection.",
+                "audio-capture": "Chrome could not find a microphone.",
+                "unsupported": "This Chrome has no speech recognition.",
+            }
+            self.speech_wanted = False
+            self.speech.stop()
+            self.call_page("__sttStopped", reasons.get(report["error"], "Speech error: " + str(report["error"])))
+        return False
 
     def set_focus_mode(self, wanted):
         """The page asks for the keyboard (settings dialog, editing the text box, "This box only") or gives it up."""
@@ -421,8 +553,11 @@ def main():
             sys.exit(0)
         except OSError as err:
             sys.exit(f"Port {PORT} is in use by something else ({err}).")
-    App(hidden="--hidden" in sys.argv)
-    Gtk.main()
+    app = App(hidden="--hidden" in sys.argv)
+    try:
+        Gtk.main()
+    finally:
+        app.speech.stop()      # never leave a hidden Chrome running
 
 
 if __name__ == "__main__":

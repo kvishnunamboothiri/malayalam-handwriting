@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ml">
+<head>
+<meta charset="utf-8">
+<title>Speech helper</title>
+</head>
+<body>
+<p>Speech helper for the Malayalam Handwriting Linux app. It runs hidden and sends what Google's speech
+recognition hears back to the app. You can close it by stopping the microphone in the app.</p>
+<script>
+// Runs inside Chrome (the only engine here with Google's speech recognition). The Linux app starts it hidden.
+const q = new URLSearchParams(location.search);
+const token = q.get("t") || "", lang = q.get("lang") || "ml-IN";
+const post = (o) => fetch("/__stt", { method: "POST", headers: { "X-ML-Token": token }, body: JSON.stringify(o) }).catch(() => {});
+let stopping = false;
+
+function start() {
+  const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Rec) { post({ error: "unsupported" }); return; }
+  const rec = new Rec();
+  rec.lang = lang;
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.onstart = () => post({ state: "listening" });
+  rec.onresult = (e) => {
+    let interim = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i], t = r[0].transcript.trim();
+      if (r.isFinal) { if (t) post({ final: t }); } else interim += " " + r[0].transcript;
+    }
+    if (interim.trim()) post({ interim: interim.trim() });
+  };
+  rec.onerror = (e) => {
+    if (e.error === "no-speech" || e.error === "aborted") return;     // normal: nobody spoke for a while
+    stopping = true;                                                   // permission, network or microphone problem
+    post({ error: e.error });
+  };
+  rec.onend = () => { if (!stopping) setTimeout(start, 300); };        // Chrome ends sessions on its own; keep listening
+  try { rec.start(); } catch (err) { post({ error: String(err.message || err) }); }
+}
+start();
+</script>
+</body>
+</html>

@@ -163,7 +163,8 @@
   /* On the desktop dictation is the main use: small writing pad, large microphone button. */
   .desk #padwrap { min-height: 110px; }
   .desk #text { height: 150px; min-height: 150px; max-height: 150px; }
-  #targetrow { display: none; }
+  #targetrow, #engrow { display: none; }
+  .desk #engrow { display: block; }
   .desk #targetrow { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--muted); font-size: 14px; }
   .desk #bar #mic { flex: 1.6 1 24%; font-size: 24px; }
   .desk #bar #space { flex: 2 1 36%; }
@@ -246,6 +247,10 @@
       <p>Paste a free API key from <b>aistudio.google.com/apikey</b>. It is stored only on this device.</p>
       <label>API key<input id="key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
       <label>Microphone<select id="micsel"><option value="">Automatic</option></select></label>
+      <label id="engrow">Voice engine<select id="engine">
+        <option value="gemini">Gemini (needs the API key below)</option>
+        <option value="chrome">Google speech through Chrome (no key, words appear as you speak)</option>
+      </select></label>
       <label>Speech sensitivity<select id="sens">
         <option value="normal">Normal</option>
         <option value="high">High (quiet voice or microphone)</option>
@@ -586,6 +591,10 @@
   // How far above the room's own noise a voice must rise to start (kStart) and to carry on (kCont) a phrase.
   const SENS = { high: [2.0, 1.4], normal: [2.6, 1.6], low: [3.6, 2.0] };
   const getSens = () => { try { const v = localStorage.getItem("ml-hw-sens"); return SENS[v] ? v : "normal"; } catch { return "normal"; } };
+  // Which voice engine: "gemini" (audio sent to the Gemini API) or, in the Linux app only, "chrome"
+  // (a hidden Chrome runs Google's speech recognition and the app receives the words).
+  const getEngine = () => { try { return host && localStorage.getItem("ml-hw-engine") === "chrome" ? "chrome" : "gemini"; } catch { return "gemini"; } };
+  let chromeOn = false;
   const getMic = () => { try { return localStorage.getItem("ml-hw-mic") || ""; } catch { return ""; } };
 
   async function openStream() {
@@ -788,7 +797,31 @@
     }
   }
 
+  function spacedPhrase(t) {
+    const before = text.value.slice(0, text.selectionStart ?? text.value.length);
+    return (before && !/\s$/.test(before) ? " " : "") + t + " ";
+  }
+  function endChrome(note, isError) {
+    chromeOn = false;
+    mic.classList.remove("on");
+    emit({ rec: false });
+    setStatus(note || "", !!isError);
+  }
+  function toggleChrome() {
+    if (chromeOn) { emit({ stt: "stop" }); endChrome(""); return; }
+    chromeOn = true;
+    mic.classList.add("on");
+    emit({ rec: true });
+    emit({ stt: "start", lang: lang === "en" ? "en-IN" : "ml-IN" });
+    setStatus("Listening (Google speech)… tap the mic to stop.");
+  }
+  // called by the Linux app with what Google's speech recognition (through the hidden Chrome) heard
+  window.__sttFinal = (t) => { if (chromeOn && t) { insert(spacedPhrase(t)); setStatus("Listening (Google speech)… tap the mic to stop."); } };
+  window.__sttInterim = (t) => { if (chromeOn) setStatus("… " + t); };
+  window.__sttStopped = (why) => { if (chromeOn) endChrome(why, true); };
+
   mic.addEventListener("click", async () => {
+    if (chromeOn || (!recorder && getEngine() === "chrome")) { toggleChrome(); return; }
     if (recorder) { stopRecording(); return; }
     if (!getKey()) { openSettings(); return; }
     try {
@@ -806,6 +839,7 @@
     $("key").value = getKey();
     $("model").value = getModel();
     $("sens").value = getSens();
+    $("engine").value = getEngine();
     dlg.showModal();
     syncFocus();
     fillMics();
@@ -816,6 +850,7 @@
     try {
       localStorage.setItem("ml-hw-key", $("key").value.trim());
       localStorage.setItem("ml-hw-sens", $("sens").value);
+      localStorage.setItem("ml-hw-engine", $("engine").value);
       const micId = $("micsel").value;
       if (micId) localStorage.setItem("ml-hw-mic", micId); else localStorage.removeItem("ml-hw-mic");
       const m = $("model").value.trim();
