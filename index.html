@@ -593,7 +593,16 @@
   const getSens = () => { try { const v = localStorage.getItem("ml-hw-sens"); return SENS[v] ? v : "normal"; } catch { return "normal"; } };
   // Which voice engine: "gemini" (audio sent to the Gemini API) or, in the Linux app only, "chrome"
   // (a hidden Chrome runs Google's speech recognition and the app receives the words).
-  const getEngine = () => { try { return host && localStorage.getItem("ml-hw-engine") === "chrome" ? "chrome" : "gemini"; } catch { return "gemini"; } };
+  // In the Linux app the default is Google speech whenever Chrome is installed (the app tells us with window.__mlChrome);
+  // a choice saved in Voice settings always wins.
+  const getEngine = () => {
+    if (!host) return "gemini";
+    let saved = "";
+    try { saved = localStorage.getItem("ml-hw-engine") || ""; } catch {}
+    if (saved === "gemini" || saved === "chrome") return saved;
+    return window.__mlChrome ? "chrome" : "gemini";
+  };
+  window.__engine = getEngine;
   let chromeOn = false;
   const getMic = () => { try { return localStorage.getItem("ml-hw-mic") || ""; } catch { return ""; } };
 

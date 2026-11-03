@@ -241,6 +241,10 @@ class App:
         ctx = WebKit2.WebContext.new_with_website_data_manager(manager)
         ucm = WebKit2.UserContentManager()
         ucm.register_script_message_handler("mlbridge")
+        # tell the page whether Chrome is installed, so Google speech can be its default voice engine
+        flag = "true" if ChromeSpeech.find_chrome() else "false"
+        ucm.add_script(WebKit2.UserScript.new(f"window.__mlChrome = {flag};", WebKit2.UserContentInjectedFrames.TOP_FRAME,
+                                              WebKit2.UserScriptInjectionTime.START, None, None))
         ucm.connect("script-message-received::mlbridge", self.on_message)
         self.view = WebKit2.WebView(web_context=ctx, user_content_manager=ucm)
         settings = self.view.get_settings()
@@ -349,7 +353,8 @@ class App:
                 self.view.run_javascript("document.getElementById('mic').click()", None, None, None)
         self.view.run_javascript(
             "(()=>{const m=document.getElementById('mic'); "
-            "if (!m.classList.contains('on') && localStorage.getItem('ml-hw-engine') !== 'chrome' && !localStorage.getItem('ml-hw-key')) return 'nokey'; "
+            "const e = window.__engine ? window.__engine() : 'gemini'; "
+            "if (!m.classList.contains('on') && e !== 'chrome' && !localStorage.getItem('ml-hw-key')) return 'nokey'; "
             "m.click(); return 'ok';})()", None, done)
 
     def remember_active(self):

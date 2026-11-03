@@ -56,6 +56,8 @@ Voice settings has a "Voice engine" choice:
     better, and it needs no API key. It needs Google Chrome installed and internet.
     Chrome only does the listening; you never see its window. Stopping the
     microphone in the app also stops Chrome.
+In the Linux app, Google speech is the default whenever Chrome is installed (otherwise
+Gemini is used). Whatever you choose in Voice settings is remembered.
 Try both and keep the one that suits your voice and room.
 
 Install
