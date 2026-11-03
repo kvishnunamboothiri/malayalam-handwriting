@@ -162,14 +162,16 @@
   #bar #cut, #bar #copy { font-weight: 600; }
   /* On the desktop dictation is the main use: small writing pad, large microphone button. */
   .desk #padwrap { min-height: 110px; }
-  .desk #text { height: 64px; min-height: 64px; max-height: 64px; }
+  .desk #text { height: 150px; min-height: 150px; max-height: 150px; }
+  #targetrow { display: none; }
+  .desk #targetrow { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--muted); font-size: 14px; }
   .desk #bar #mic { flex: 1.6 1 24%; font-size: 24px; }
   .desk #bar #space { flex: 2 1 36%; }
   #bar #copy { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   #opts { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-  #lang { display: flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--panel); }
-  #lang button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 14px; padding: 6px 14px; min-height: 34px; }
-  #lang button.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  #lang, #target { display: flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--panel); }
+  #lang button, #target button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 14px; padding: 6px 14px; min-height: 34px; }
+  #lang button.on, #target button.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
   #settings { border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; text-decoration: underline; padding: 2px; }
   dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); width: min(92vw, 420px); padding: 16px; }
   dialog::backdrop { background: rgba(0,0,0,.45); }
@@ -182,16 +184,19 @@
   dialog .row button { border: 1px solid var(--line); border-radius: 10px; background: var(--chip); color: var(--ink); font: inherit; padding: 10px 18px; }
   dialog .row #dlg-save { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   .kb body { padding-top: 8px; padding-bottom: 8px; gap: 6px; }
-  .kb #text { min-height: 56px; max-height: 56px; font-size: 20px; padding: 6px 42px 6px 10px; }
+  .kb #text { font-size: 20px; padding: 6px 42px 6px 10px; }
   .kb #cands { min-height: 44px; }
   .kb #wipe { top: 4px; right: 4px; width: 28px; height: 28px; }
-  .kb #padwrap { min-height: 70px; }
   .kb #bar { gap: 6px; }
   .kb #bar button { min-height: 40px; }
   .kb #bar #space { min-height: 48px; }
   .kb #bar #brk { margin-top: -6px; }
   .kb #settings { display: none; }
   .kb #lang button { min-height: 28px; padding: 3px 12px; }
+  /* Typing (the keyboard button is on, or the keyboard is open): the text box takes the room and the writing pad shrinks. */
+  .typing #textwrap, .kb #textwrap { display: flex; flex: 1 1 auto; min-height: 110px; }
+  .typing #text, .kb #text { flex: 1 1 auto; height: auto; min-height: 0; max-height: none; }
+  .typing #padwrap, .kb #padwrap { flex: 0 0 84px; min-height: 84px; }
   #status { color: var(--muted); font-size: 13px; min-height: 16px; text-align: center; -webkit-user-select: text; user-select: text; }
   #status.err { color: #c0392b; font-size: 15px; font-weight: 600; }
 </style>
@@ -220,6 +225,13 @@
     <button id="copy" type="button">Copy</button>
   </div>
   <div id="status"></div>
+  <div id="targetrow">
+    <span>Send words to</span>
+    <div id="target" role="group" aria-label="Where words go">
+      <button type="button" data-target="other">Other window</button>
+      <button type="button" data-target="here">This box only</button>
+    </div>
+  </div>
   <div id="opts">
     <div id="lang" role="group" aria-label="Language">
       <button type="button" data-lang="ml">മലയാളം</button>
@@ -250,7 +262,14 @@
 
   // Desktop bridge: inside the Linux app, text and keys are also sent to the window you are typing in.
   const host = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.mlbridge;
-  const emit = (msg) => { if (host) host.postMessage(JSON.stringify(msg)); };
+  // "This box only": words stay in the text box and nothing is typed into other windows.
+  let localOnly = false;
+  try { localOnly = localStorage.getItem("ml-hw-here") === "1"; } catch {}
+  const emit = (msg) => {
+    if (!host) return;
+    if (localOnly && ("text" in msg || "back" in msg || "key" in msg)) return;
+    host.postMessage(JSON.stringify(msg));
+  };
   const dbg = (m) => emit({ log: m });
   if (host) document.documentElement.classList.add("desk");
   const pad = $("pad"), ctx = pad.getContext("2d");
@@ -764,11 +783,11 @@
   function openSettings() {
     $("key").value = getKey();
     $("model").value = getModel();
-    emit({ focus: true });      // the Linux app only takes keyboard focus while this dialog is open
     dlg.showModal();
+    syncFocus();
     fillMics();
   }
-  dlg.addEventListener("close", () => emit({ focus: false }));
+  dlg.addEventListener("close", () => syncFocus());
   $("settings").addEventListener("click", openSettings);
   $("dlg-save").addEventListener("click", () => {
     try {
@@ -805,12 +824,44 @@
     e.preventDefault();          // keep focus where it is until the click is handled
   });
   kbd.addEventListener("click", () => {
-    if (host) { emit({ key: "Return" }); return; }   // in the desktop app this button is Enter
+    if (host) {                                       // in the desktop app this button is Enter
+      if (localOnly) insert("\n"); else emit({ key: "Return" });
+      return;
+    }
     if (kbdWasOpen) text.blur(); else text.focus();
   });
   if (host) { kbd.textContent = "↵"; kbd.setAttribute("aria-label", "Enter"); }
-  text.addEventListener("focus", () => kbd.classList.add("on"));
-  text.addEventListener("blur", () => kbd.classList.remove("on"));
+
+  // The Linux app's window normally refuses keyboard focus, so clicking it never takes focus from the window you
+  // type in. It takes focus only while the settings dialog is open, while you edit the text box, or in "This box only".
+  let focusSent = null;
+  function syncFocus() {
+    if (!host) return;
+    const want = localOnly || dlg.open || (document.activeElement === text && document.hasFocus());
+    if (want !== focusSent) { focusSent = want; emit({ focus: want }); }
+  }
+  window.__syncFocus = () => { focusSent = null; syncFocus(); };    // the app calls this after showing the window
+  if (host) {
+    text.addEventListener("pointerdown", () => {
+      focusSent = true; emit({ focus: true });                       // click in the box: take the keyboard
+      setTimeout(() => text.focus(), 250);
+    });
+    text.addEventListener("blur", () => setTimeout(syncFocus, 50));
+    window.addEventListener("blur", () => { if (!localOnly) { focusSent = null; syncFocus(); } });
+  }
+
+  function showTarget() {
+    document.querySelectorAll("#target button").forEach((b) => b.classList.toggle("on", (b.dataset.target === "here") === localOnly));
+  }
+  document.querySelectorAll("#target button").forEach((b) => b.addEventListener("click", () => {
+    localOnly = b.dataset.target === "here";
+    try { localStorage.setItem("ml-hw-here", localOnly ? "1" : "0"); } catch {}
+    showTarget();
+    focusSent = null; syncFocus();
+  }));
+  showTarget();
+  text.addEventListener("focus", () => { kbd.classList.add("on"); document.documentElement.classList.add("typing"); });
+  text.addEventListener("blur", () => { kbd.classList.remove("on"); document.documentElement.classList.remove("typing"); });
 
   function save() {
     try { localStorage.setItem("ml-hw-text", text.value); } catch {}

@@ -92,6 +92,14 @@ Using it
   (A "hidden" window is made fully transparent, click-through and frameless, because
   the browser engine inside blocks the microphone for a truly hidden window. It
   catches no clicks.)
+* Where the words go: the "Send words to" switch has two settings. "Other window"
+  (default) types them into the window you were using. "This box only" keeps them
+  in the app's own text box and sends nothing to other windows; the window then
+  holds the keyboard so you can type there too.
+* Typing in the text box: click in the box and the app takes the keyboard, so you can
+  type or edit. When a spoken phrase or a handwritten word is sent to the other
+  window while you are editing, the keyboard goes back to that window first.
+  The box is large so longer text is easy to read and fix.
 * Language: the Malayalam / English switch at the bottom decides how handwriting
   and voice are read. Set it before you write or speak.
 * Voice: tap the microphone button once, speak, and pause for about a second; each

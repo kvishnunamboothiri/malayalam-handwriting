@@ -108,7 +108,7 @@ class Typer:
         ev = protocol.event.ClientMessage(
             window=self.disp.create_resource_object("window", wid),
             client_type=self.disp.intern_atom("_NET_ACTIVE_WINDOW"),
-            data=(32, [1, X.CurrentTime, 0, 0, 0]),
+            data=(32, [2, X.CurrentTime, 0, 0, 0]),   # 2 = request from a pager/taskbar, which window managers obey
         )
         self.disp.screen().root.send_event(ev, event_mask=X.SubstructureRedirectMask | X.SubstructureNotifyMask)
         self.disp.flush()
@@ -181,7 +181,7 @@ class App:
         self.view.load_uri(f"http://localhost:{PORT}/")
 
         win = Gtk.Window(title="Malayalam Handwriting")
-        win.set_default_size(430, 500)   # compact: dictation is the main use here, the pad is secondary
+        win.set_default_size(430, 660)   # roomy text box; the writing pad is secondary here
         win.set_accept_focus(False)        # clicks here must not steal focus from the window you type in
         win.set_focus_on_map(False)
         win.set_keep_above(True)
@@ -195,6 +195,10 @@ class App:
         self.win = win
         self.ghosted = False
         self.previous = 0
+        self.focus_wanted = False   # the page wants keyboard focus (settings dialog, editing the box, "This box only")
+        self.has_focus_mode = False # this window currently holds the keyboard
+        self.held = []              # words waiting while focus is handed back to the other window
+        self.releasing = False
         win.add(self.view)
         win.show_all()
         self.tray = self.make_tray()
@@ -307,7 +311,11 @@ class App:
             else:
                 self.win.show()
         self.win.set_keep_above(True)
-        GLib.timeout_add(150, lambda: (self.typer.activate(self.last_real), False)[1])   # keep typing where you were
+        self.view.run_javascript("window.__syncFocus && window.__syncFocus()", None, None, None)
+        if not self.focus_wanted:
+            GLib.timeout_add(150, lambda: (self.typer.activate(self.last_real), False)[1])   # keep typing where you were
+        else:
+            self.apply_focus()
         return False
 
     def hide(self):
@@ -315,6 +323,7 @@ class App:
         can start listening, so the window stays mapped but is fully transparent, click-through and has no
         title bar or frame (the frame is what caught clicks). Its size is left alone: shrinking it broke the page."""
         self.shown = False
+        self.apply_focus()          # a hidden window must not keep the keyboard
         screen = self.win.get_screen()
         if screen is not None and screen.is_composited() and self.win.get_window() is not None:
             self.ghosted = True
@@ -349,19 +358,50 @@ class App:
         elif "focus" in msg:
             self.set_focus_mode(bool(msg["focus"]))
         else:
-            self.typer.push(msg)
+            self.deliver(msg)
 
     def set_focus_mode(self, wanted):
-        """Take keyboard focus while a text field here needs it (the settings dialog), then give it back."""
-        if wanted:
-            self.previous = self.typer.active_window()
+        """The page asks for the keyboard (settings dialog, editing the text box, "This box only") or gives it up."""
+        self.focus_wanted = wanted
+        self.apply_focus()
+
+    def apply_focus(self):
+        want = self.focus_wanted and self.shown
+        if want and not self.has_focus_mode:
+            self.has_focus_mode = True
+            self.previous = self.last_real or self.typer.active_window()
             self.win.set_accept_focus(True)
             self.win.present()
+            self.typer.activate(self.own_xid())
             self.view.grab_focus()
-        else:
+        elif not want and self.has_focus_mode:
+            self.has_focus_mode = False
             self.win.set_accept_focus(False)
             self.typer.activate(self.previous)
             self.previous = 0
+
+    def deliver(self, msg):
+        """Send words, Backspace or Enter to the other window. If this window holds the keyboard right now
+        (you were editing the text box), give the keyboard back to that window first, then type there."""
+        if self.releasing:
+            self.held.append(msg)
+        elif self.has_focus_mode:
+            self.held.append(msg)
+            self.releasing = True
+            self.has_focus_mode = False
+            self.win.set_accept_focus(False)
+            self.typer.activate(self.previous or self.last_real)
+            self.previous = 0
+            GLib.timeout_add(250, self.flush_held)
+        else:
+            self.typer.push(msg)
+
+    def flush_held(self):
+        self.releasing = False
+        held, self.held = self.held, []
+        for msg in held:
+            self.typer.push(msg)
+        return False
 
     def on_permission(self, _view, request):
         if isinstance(request, WebKit2.UserMediaPermissionRequest):
