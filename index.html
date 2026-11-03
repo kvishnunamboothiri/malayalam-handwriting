@@ -642,6 +642,7 @@
     const block = 4096 / rate;
     const meter = $("meter"), bar = meter.firstElementChild;
     meter.classList.add("on");
+    meter.lastElementChild.style.visibility = "visible";
     dbg("recording started, sample rate " + rate + ", track " + stream.getAudioTracks()[0].label);
     const src = ac.createMediaStreamSource(stream);
     const proc = ac.createScriptProcessor(4096, 1, 1);
@@ -810,8 +811,16 @@
     const before = text.value.slice(0, text.selectionStart ?? text.value.length);
     return (before && !/\s$/.test(before) ? " " : "") + t + " ";
   }
+  let hearTimer = null;
+  function flashHear() {            // green while Google is hearing speech (it sent words a moment ago)
+    const meter = $("meter");
+    meter.classList.add("hear");
+    clearTimeout(hearTimer);
+    hearTimer = setTimeout(() => meter.classList.remove("hear"), 700);
+  }
   function endChrome(note, isError) {
     chromeOn = false;
+    $("meter").classList.remove("on", "hear");
     mic.classList.remove("on");
     emit({ rec: false });
     setStatus(note || "", !!isError);
@@ -819,14 +828,19 @@
   function toggleChrome() {
     if (chromeOn) { emit({ stt: "stop" }); endChrome(""); return; }
     chromeOn = true;
+    const meter = $("meter");
+    meter.classList.add("on");
+    meter.firstElementChild.style.width = "0%";
+    meter.lastElementChild.style.visibility = "hidden";     // no threshold tick: Google decides what is speech
     mic.classList.add("on");
-    emit({ rec: true });
+    emit({ rec: true, engine: "chrome" });
     emit({ stt: "start", lang: lang === "en" ? "en-IN" : "ml-IN" });
     setStatus("Listening (Google speech)… tap the mic to stop.");
   }
   // called by the Linux app with what Google's speech recognition (through the hidden Chrome) heard
-  window.__sttFinal = (t) => { if (chromeOn && t) { insert(spacedPhrase(t)); setStatus("Listening (Google speech)… tap the mic to stop."); } };
-  window.__sttInterim = (t) => { if (chromeOn) setStatus("… " + t); };
+  window.__sttFinal = (t) => { if (chromeOn && t) { flashHear(); insert(spacedPhrase(t)); setStatus("Listening (Google speech)… tap the mic to stop."); } };
+  window.__sttInterim = (t) => { if (chromeOn) { flashHear(); setStatus("… " + t); } };
+  window.__sttLevel = (v) => { if (chromeOn) $("meter").firstElementChild.style.width = Math.min(100, v * 3000) + "%"; };
   window.__sttStopped = (why) => { if (chromeOn) endChrome(why, true); };
 
   mic.addEventListener("click", async () => {
@@ -836,7 +850,7 @@
     try {
       await startRecording();
       mic.classList.add("on");
-      emit({ rec: true });      // the Linux app turns its tray icon red while the microphone is on
+      emit({ rec: true, engine: "gemini" });      // the Linux app turns its tray icon red while the microphone is on
       setStatus(LISTEN_MSG);
     } catch (err) {
       setStatus(err && err.name === "NotAllowedError" ? "Microphone permission denied." : "Can't use the microphone: " + (err.message || err), true);

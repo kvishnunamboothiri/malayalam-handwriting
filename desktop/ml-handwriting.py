@@ -279,13 +279,15 @@ class App:
         Handler.stt_token = self.speech.token
         Handler.on_stt = self.on_speech
         win.add(self.view)
-        win.show_all()
+        self.rec_engine = None       # "chrome" or "gemini" while the microphone is on
         self.tray = self.make_tray()
         Handler.on_show = self.show
         GLib.timeout_add(400, self.remember_active)
-        self.shown = True
         if hidden and self.tray:
-            self.hide()
+            self.shown = False       # started hidden (login): nothing is ever drawn on screen until you ask
+        else:
+            self.shown = True
+            win.show_all()
 
     # --- tray icon and showing / hiding -------------------------------------------------------
 
@@ -312,8 +314,12 @@ class App:
         icon.set_visible(True)
         return icon
 
-    def set_recording(self, on):
+    def set_recording(self, on, engine=None):
         """Red tray icon while the microphone is listening."""
+        self.rec_engine = engine if on else None
+        if not on and not self.shown and self.win.get_mapped():
+            self.unghost()
+            self.win.hide()          # listening ended while the window is hidden: now it can really go away
         if not self.tray:
             return
         if getattr(self, "pulse_id", None):
@@ -345,17 +351,23 @@ class App:
         """Start or stop listening from the tray, even while the window is hidden."""
         def done(view, res):
             try:
-                answer = view.run_javascript_finish(res).get_js_value().to_string()
-            except GLib.Error:
+                answer = json.loads(view.run_javascript_finish(res).get_js_value().to_string())
+            except (GLib.Error, ValueError):
                 return
-            if answer == "nokey":
+            if answer.get("state") == "nokey":
                 self.show()                         # no key yet: show the window so Voice settings can be filled in
+                self.view.run_javascript("document.getElementById('mic').click()", None, None, None)
+            elif answer.get("state") == "start" and answer.get("engine") == "gemini" and not self.shown:
+                self.map_invisibly()                # the browser engine only records while its window is mapped
+                GLib.timeout_add(400, lambda: (self.view.run_javascript("document.getElementById('mic').click()", None, None, None), False)[1])
+            else:
                 self.view.run_javascript("document.getElementById('mic').click()", None, None, None)
         self.view.run_javascript(
             "(()=>{const m=document.getElementById('mic'); "
             "const e = window.__engine ? window.__engine() : 'gemini'; "
-            "if (!m.classList.contains('on') && e !== 'chrome' && !localStorage.getItem('ml-hw-key')) return 'nokey'; "
-            "m.click(); return 'ok';})()", None, done)
+            "if (m.classList.contains('on')) return JSON.stringify({state: 'stop', engine: e}); "
+            "if (e !== 'chrome' && !localStorage.getItem('ml-hw-key')) return JSON.stringify({state: 'nokey', engine: e}); "
+            "return JSON.stringify({state: 'start', engine: e});})()", None, done)
 
     def remember_active(self):
         """Note which window you are working in, so it gets focus back after the window is shown."""
@@ -379,17 +391,27 @@ class App:
         else:
             self.show()
 
+    def ghost_props(self):
+        """Invisible but still mapped: transparent, click-through and frameless (the frame is what caught clicks)."""
+        self.ghosted = True
+        self.win.set_decorated(False)
+        self.win.set_skip_taskbar_hint(True)
+        self.win.input_shape_combine_region(cairo.Region())   # clicks pass through
+        self.win.set_opacity(0.0)
+
+    def unghost(self):
+        if self.ghosted:
+            self.ghosted = False
+            self.win.set_decorated(True)
+            self.win.input_shape_combine_region(None)         # clickable again
+            self.win.set_skip_taskbar_hint(False)
+            self.win.set_opacity(0.999)   # not exactly 1.0: that removes the property and the window can stay see-through
+
     def show(self):
         if not self.shown:
             self.shown = True
-            if self.ghosted:
-                self.ghosted = False
-                self.win.set_decorated(True)
-                self.win.input_shape_combine_region(None)   # clickable again
-                self.win.set_skip_taskbar_hint(False)
-                self.win.set_opacity(0.999)   # not exactly 1.0: that removes the property and the window can stay see-through
-            else:
-                self.win.show()
+            self.unghost()
+            self.win.show_all()
         self.win.set_keep_above(True)
         self.view.run_javascript("window.__syncFocus && window.__syncFocus()", None, None, None)
         if not self.focus_wanted:
@@ -399,21 +421,24 @@ class App:
         return False
 
     def hide(self):
-        """Hide the window. The browser engine blocks the microphone for a really hidden window, and the tray
-        can start listening, so the window stays mapped but is fully transparent, click-through and has no
-        title bar or frame (the frame is what caught clicks). Its size is left alone: shrinking it broke the page."""
+        """Hide the window for real. The one exception: the Gemini engine records through the window's own web
+        view, and the browser engine blocks the microphone for an unmapped window, so while Gemini is listening
+        the window stays mapped but invisible. The Chrome engine does not need the window at all."""
         self.shown = False
         self.apply_focus()          # a hidden window must not keep the keyboard
         screen = self.win.get_screen()
-        if screen is not None and screen.is_composited() and self.win.get_window() is not None:
-            self.ghosted = True
-            self.win.set_decorated(False)
-            self.win.set_skip_taskbar_hint(True)
-            self.win.input_shape_combine_region(cairo.Region())   # clicks pass through
-            self.win.set_opacity(0.0)
+        if (self.rec_engine == "gemini" and screen is not None and screen.is_composited()
+                and self.win.get_window() is not None):
+            self.ghost_props()
         else:
-            self.ghosted = False        # no transparency on this desktop: really hide (the microphone then stops working)
+            self.unghost()
             self.win.hide()
+
+    def map_invisibly(self):
+        """Gemini listening was started from the tray while the window is hidden: map it, but invisibly."""
+        if not self.win.get_mapped():
+            self.ghost_props()
+            self.win.show_all()
 
     def on_close(self, _win, _event):
         if self.tray:
@@ -431,7 +456,7 @@ class App:
             with open(LOG_FILE, "a", encoding="utf-8") as f:
                 f.write(time.strftime("%H:%M:%S ") + str(msg["log"]) + "\n")
         elif "rec" in msg:
-            self.set_recording(bool(msg["rec"]))
+            self.set_recording(bool(msg["rec"]), msg.get("engine"))
         elif "stt" in msg:
             self.speech_control(msg)
         elif "clip" in msg:
@@ -478,7 +503,9 @@ class App:
         return True
 
     def on_speech(self, report):
-        if "final" in report:
+        if "level" in report:
+            self.call_page("__sttLevel", float(report["level"]))     # the level bar only; not counted as speech
+        elif "final" in report:
             self.speech_idle = 0
             self.call_page("__sttFinal", str(report["final"]))
         elif "interim" in report:

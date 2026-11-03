@@ -58,6 +58,11 @@ Voice settings has a "Voice engine" choice:
     microphone in the app also stops Chrome.
 In the Linux app, Google speech is the default whenever Chrome is installed (otherwise
 Gemini is used). Whatever you choose in Voice settings is remembered.
+The thin bar along the bottom of the writing pad shows the microphone level while you
+listen, with either engine. With Gemini it also has a red tick and the "Speech
+sensitivity" setting applies. With Google speech the bar turns green while Google is
+hearing words, and Google decides what counts as speech, so the sensitivity setting
+is not used.
 Try both and keep the one that suits your voice and room.
 
 Install
@@ -106,9 +111,10 @@ Using it
   from the tray, speak, and the text goes to the window you are using.
   The window's X button only hides it. Starting the app a second time just shows
   the copy that is already running.
-  (A "hidden" window is made fully transparent, click-through and frameless, because
-  the browser engine inside blocks the microphone for a truly hidden window. It
-  catches no clicks.)
+  (When the app starts hidden, as at login, no window is created on screen at all.
+  Hiding the window later really hides it too. Only while the Gemini engine is
+  listening does the window stay open as a fully transparent, click-through, frameless
+  window, because that engine records through the window; it never catches clicks.)
 * Where the words go: the "Send words to" switch has two settings. "Other window"
   (default) types them into the window you were using. "This box only" keeps them
   in the app's own text box and sends nothing to other windows; the window then

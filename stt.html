@@ -12,7 +12,7 @@ recognition hears back to the app. You can close it by stopping the microphone i
 const q = new URLSearchParams(location.search);
 const token = q.get("t") || "", lang = q.get("lang") || "ml-IN";
 const post = (o) => fetch("/__stt", { method: "POST", headers: { "X-ML-Token": token }, body: JSON.stringify(o) }).catch(() => {});
-let stopping = false;
+let stopping = false, levelStarted = false;
 
 function start() {
   const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -22,6 +22,7 @@ function start() {
   rec.continuous = true;
   rec.interimResults = true;
   rec.onstart = () => post({ state: "listening" });
+  rec.onaudiostart = () => { if (!levelStarted) { levelStarted = true; setTimeout(startLevel, 1200); } };
   rec.onresult = (e) => {
     let interim = "";
     for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -39,6 +40,26 @@ function start() {
   try { rec.start(); } catch (err) { post({ error: String(err.message || err) }); }
 }
 start();
+
+// Also report the microphone level, so the app can draw its level bar for this engine too. It starts a moment after
+// recognition has begun, so the two never open the microphone at the same instant.
+async function startLevel() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const ac = new AudioContext();
+    await ac.resume();
+    const analyser = ac.createAnalyser();
+    analyser.fftSize = 1024;
+    ac.createMediaStreamSource(stream).connect(analyser);
+    const buf = new Float32Array(analyser.fftSize);
+    setInterval(() => {
+      analyser.getFloatTimeDomainData(buf);
+      let sum = 0;
+      for (const v of buf) sum += v * v;
+      post({ level: Math.sqrt(sum / buf.length) });
+    }, 120);
+  } catch (err) { /* the level bar just stays empty */ }
+}
 </script>
 </body>
 </html>
