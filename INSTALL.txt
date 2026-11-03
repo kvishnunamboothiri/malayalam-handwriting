@@ -132,6 +132,13 @@ If something does not work
   pad says what Google answered (for example a wrong key).
 * Text does not appear in the other window: you need an X11 session, and the cursor
   must be in a text field of that window (not a terminal).
+* Nonsense text appears from room noise: open Voice settings and set "Speech
+  sensitivity" to "Low (noisy room)". If your quiet voice is being ignored, set it to
+  "High". The thin bar along the pad shows the microphone level and a red tick marks
+  how loud a voice must be to count as speech; speak so the bar passes the tick.
+  The app also drops noises that are too short or have gaps, and ignores text that
+  Google says is not speech. A steadier microphone helps too: in your sound settings,
+  raise the input volume of the microphone and keep it away from fans and keys.
 * No tray icon: make sure the "xapp-status" applet is enabled (right-click the
   panel, Applets).
 * What the app heard is written to ~/.cache/ml-handwriting/debug.log (replaced on

@@ -178,6 +178,7 @@
   dialog h2 { margin: 0 0 6px; font-size: 18px; }
   dialog p { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
   dialog label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+  #meter b { position: absolute; top: 0; bottom: 0; width: 2px; background: #c0392b; left: 0; }
   dialog select { display: block; width: 100%; margin-top: 4px; padding: 10px; font-size: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); }
   dialog input { display: block; width: 100%; margin-top: 4px; padding: 10px; font-size: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); -webkit-user-select: text; user-select: text; }
   dialog .row { display: flex; gap: 8px; justify-content: flex-end; }
@@ -210,7 +211,7 @@
   <div id="padwrap">
     <canvas id="pad"></canvas>
     <div id="baseline"></div>
-    <div id="meter"><i></i></div>
+    <div id="meter"><i></i><b></b></div>
     <div id="placeholder">Write here</div>
   </div>
   <div id="bar">
@@ -245,6 +246,11 @@
       <p>Paste a free API key from <b>aistudio.google.com/apikey</b>. It is stored only on this device.</p>
       <label>API key<input id="key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
       <label>Microphone<select id="micsel"><option value="">Automatic</option></select></label>
+      <label>Speech sensitivity<select id="sens">
+        <option value="normal">Normal</option>
+        <option value="high">High (quiet voice or microphone)</option>
+        <option value="low">Low (noisy room)</option>
+      </select></label>
       <label>Model<input id="model" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
       <div class="row"><button value="cancel">Cancel</button><button id="dlg-save" value="save">Save</button></div>
     </form>
@@ -577,6 +583,9 @@
   const MAX_PHRASE = 25;     // seconds; longer phrases are cut here
   let pending = Promise.resolve();   // transcriptions run one after another so the text stays in order
 
+  // How far above the room's own noise a voice must rise to start (kStart) and to carry on (kCont) a phrase.
+  const SENS = { high: [2.0, 1.4], normal: [2.6, 1.6], low: [3.6, 2.0] };
+  const getSens = () => { try { const v = localStorage.getItem("ml-hw-sens"); return SENS[v] ? v : "normal"; } catch { return "normal"; } };
   const getMic = () => { try { return localStorage.getItem("ml-hw-mic") || ""; } catch { return ""; } };
 
   async function openStream() {
@@ -621,15 +630,19 @@
 
     let pre = [];          // the last few blocks before speech starts, so the first syllable isn't clipped
     let seg = null;        // blocks of the phrase being spoken
-    let voiced = 0, quiet = 0, idle = 0, segSec = 0;
+    let voiced = 0, quiet = 0, idle = 0, segSec = 0, strong = 0, run = 0, lead = 0;
+    const [kStart, kCont] = SENS[getSens()];
     let noise = 0.002;     // background level: measured in the first moments, then followed up and down
     let elapsed = 0, loudest = 0, warned = false, secMax = 0, lastLog = 0, logLines = 0;
     const micName = stream.getAudioTracks()[0].label || "the microphone";
 
     function flush() {
-      const chunks = seg, enough = voiced >= 0.25;
-      if (chunks) dbg("phrase ended: voiced " + voiced.toFixed(2) + "s of " + segSec.toFixed(2) + "s, " + (enough ? "sent" : "too short, dropped"));
-      seg = null; voiced = 0; quiet = 0; segSec = 0; idle = 0;
+      // A real phrase has several clearly strong moments; a click, a knock or a rise in room noise does not.
+      // Speech fills most of its own length; clicks and knocks leave gaps. Pre-roll and the closing pause do not count.
+      const span = Math.max(segSec - quiet - lead, block), share = voiced / span;
+      const chunks = seg, enough = voiced >= 0.35 && strong >= 3 && share >= 0.45;
+      if (chunks) dbg("phrase ended: voiced " + voiced.toFixed(2) + "s of " + span.toFixed(2) + "s (" + Math.round(share * 100) + "%), strong blocks " + strong + ", " + (enough ? "sent" : "looked like noise, dropped"));
+      seg = null; voiced = 0; quiet = 0; segSec = 0; idle = 0; strong = 0; run = 0; lead = 0;
       if (!chunks || !enough) return;
       const wav = encodeWav(chunks, rate);
       pending = pending.then(() => transcribe(wav));
@@ -644,10 +657,12 @@
       secMax = Math.max(secMax, rms);
       const calibrating = elapsed <= 0.4;
       if (calibrating) noise = elapsed <= block * 1.01 ? rms : Math.min(noise, rms);
-      const loud = !calibrating && rms > Math.max(0.004, noise * 1.8);   // raw microphones may only be 2-3x louder than their own noise
+      const startT = Math.max(0.006, noise * kStart);   // needed to start a phrase
+      const contT = Math.max(0.004, noise * kCont);     // enough to carry a phrase on (so brief dips do not cut it)
+      const loud = !calibrating && rms > (seg ? contT : startT);
       if (elapsed - lastLog >= 1 && logLines < 40) {
         lastLog = elapsed; logLines++;
-        dbg("level: loudest in last second " + secMax.toFixed(4) + ", noise " + noise.toFixed(4) + ", threshold " + Math.max(0.004, noise * 1.8).toFixed(4));
+        dbg("level: loudest in last second " + secMax.toFixed(4) + ", noise " + noise.toFixed(4) + ", start threshold " + startT.toFixed(4) + ", continue " + contT.toFixed(4));
         secMax = 0;
       }
       if (!warned && elapsed >= 3 && loudest < 0.0015) {
@@ -656,13 +671,15 @@
         setStatus("No sound from \"" + micName + "\". Is it the right microphone? Choose it in Voice settings.", true);
       }
       bar.style.width = Math.min(100, rms * 3000) + "%";
+      meter.lastElementChild.style.left = Math.min(100, startT * 3000) + "%";   // red tick: how loud a voice must be
       meter.classList.toggle("hear", loud);
       if (!seg) {
         pre.push(d);
-        if (pre.length > 3) pre.shift();
-        if (loud) {
+        if (pre.length > 4) pre.shift();
+        run = loud ? run + 1 : 0;
+        if (run >= 2) {            // two strong blocks in a row (about 0.2 s) start a phrase; a single click does not
           seg = pre; pre = [];
-          segSec = seg.length * block; voiced = block; quiet = 0;
+          segSec = seg.length * block; voiced = run * block; strong = run; quiet = 0; lead = (seg.length - run) * block; run = 0;
         } else {
           idle += block;
           if (idle >= IDLE_STOP) stopRecording();
@@ -670,7 +687,7 @@
       } else {
         seg.push(d);
         segSec += block;
-        if (loud) { voiced += block; quiet = 0; } else quiet += block;
+        if (rms > contT) { voiced += block; quiet = 0; if (rms > startT) strong++; } else quiet += block;
         if (quiet >= END_SILENCE || segSec >= MAX_PHRASE) flush();
       }
       // Fall quickly, rise slowly: steady room noise is learned, a spoken phrase barely moves it.
@@ -713,7 +730,7 @@
               { text: (lang === "en"
                 ? "Transcribe this speech exactly as spoken. It is in English: write it in English. If a word is not English, still spell it in English letters. "
                 : "Transcribe this speech exactly as spoken. It is in Malayalam: write it in Malayalam script. ")
-                + "Output only the transcription, with no commentary, quotes or translation. If there is no clear speech, output nothing." },
+                + "Output only the transcription, with no commentary, quotes or translation. If the audio has no clearly audible human speech (only silence, background noise, clicks, music or sounds you cannot make out as words), output exactly NO_SPEECH. Never guess or invent words." },
               { inline_data: { mime_type: "audio/wav", data: audio } },
             ] }],
             generationConfig: { temperature: 0 },
@@ -751,8 +768,13 @@
       if (!res.ok) throw new Error((data.error && data.error.message) || "HTTP " + res.status);
       const out = ((data.candidates || [])[0]?.content?.parts || []).map((p) => p.text || "").join("").trim();
       const finish = (data.candidates && data.candidates[0] && data.candidates[0].finishReason) || "-";
-      dbg("response " + res.status + ", " + out.length + " characters, finish " + finish);
-      if (out) {
+      const seconds = (wav.length - 44) / 2 / 16000;
+      dbg("response " + res.status + ", " + out.length + " characters for " + seconds.toFixed(1) + " s of audio, finish " + finish);
+      if (/NO_SPEECH/.test(out) || (out.length / Math.max(seconds, 0.5) > 28)) {
+        // no speech, or far more text than the audio can hold: the model made it up from noise
+        dbg("ignored: " + (/NO_SPEECH/.test(out) ? "the model heard no speech" : "text too long for the audio, probably invented"));
+        setStatus(recorder ? LISTEN_MSG : "");
+      } else if (out) {
         const before = text.value.slice(0, text.selectionStart ?? text.value.length);
         insert((before && !/\s$/.test(before) ? " " : "") + out + " ");
         setStatus(recorder ? LISTEN_MSG : "");
@@ -783,6 +805,7 @@
   function openSettings() {
     $("key").value = getKey();
     $("model").value = getModel();
+    $("sens").value = getSens();
     dlg.showModal();
     syncFocus();
     fillMics();
@@ -792,6 +815,7 @@
   $("dlg-save").addEventListener("click", () => {
     try {
       localStorage.setItem("ml-hw-key", $("key").value.trim());
+      localStorage.setItem("ml-hw-sens", $("sens").value);
       const micId = $("micsel").value;
       if (micId) localStorage.setItem("ml-hw-mic", micId); else localStorage.removeItem("ml-hw-mic");
       const m = $("model").value.trim();
